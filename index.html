@@ -1,68 +1,56 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
+<script>
+/* Gäste ohne Profil sehen zuerst die Startseite (landing.html). ?neu=1 überspringt sie. */
+(function(){
+  try {
+    var q = location.search || '';
+    var hasProfile = !!(localStorage.getItem('sm_chat_code') && localStorage.getItem('sm_chat_token'));
+    var standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+    if (!hasProfile && !standalone && !/[?&]neu=1/.test(q)) location.replace('landing.html' + q);
+  } catch (e) {}
+})();
+</script>
 <!-- External CSS -->
 <link rel="stylesheet" href="messenger.css">
 
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"> </script>
+<script src="peerjs.min.js"></script>
 
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Spot Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>SpotMe Messenger</title>
+  <meta name="description" content="Der SpotMe Messenger: anonym und privat schreiben. Nur ein Name, keine Telefonnummer, keine E-Mail, keine Werbung. Als Link aufs Handy – ohne App-Store.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://spotme-caching.github.io/chat/">
+  <meta property="og:title" content="SpotMe Messenger – Schreiben ohne Nummer, ohne E-Mail">
+  <meta property="og:description" content="Anonym und privat schreiben: nur ein Name, keine Telefonnummer, keine Werbung. Als Link aufs Handy – ohne App-Store.">
+  <meta property="og:image" content="https://spotme-caching.github.io/chat/icons/spot_512.png">
+  <meta name="twitter:card" content="summary">
   <link rel="manifest" href="/chat/manifest.json">
   <meta name="theme-color" content="#0a0d12">
   <link rel="stylesheet" href="../fonts.css">
+  <link rel="stylesheet" href="../theme-vars.css">
+  <script>try{document.documentElement.setAttribute('data-theme',localStorage.getItem('sm_theme')==='light'?'light':'dark')}catch(e){}</script>
 </head>
 <body>
 
 <script src="webrtc.js"></script>
 
-  <!-- Login Screen -->
-  <div id="loginScreen">
+  <!-- Erster Aufruf: nur Name eingeben, Profil wird automatisch angelegt -->
+  <div id="loginScreen" class="hidden">
     <div class="logo">🐱</div>
     <h1>Spot - Chat</h1>
-    <p class="subtitle">Eigenständiger Messenger mit P2P</p>
-
-    <div id="loginForm">
-      <input type="text" id="loginCode" maxlength="6" placeholder="6-stelliger Code">
-      <input type="password" id="loginToken" placeholder="Token">
-      <button onclick="handleLogin()">Anmelden</button>
-      <p id="loginError" class="error"></p>
-      <button type="button" class="link-btn" onclick="showRegisterForm()">Neu hier? Jetzt registrieren</button>
-    </div>
-
-    <div id="registerForm" class="hidden">
-      <input type="text" id="registerName" maxlength="40" placeholder="Dein Anzeigename">
-      <button onclick="handleRegister()">Code erstellen</button>
+    <p class="subtitle">Privater Messenger – ohne Standort, ohne Anmeldung</p>
+    <div id="registerForm">
+      <input type="text" id="registerName" maxlength="40" placeholder="Dein Name (echt oder Fantasie)" autocomplete="off">
+      <button id="setupBtn" onclick="createProfile()">Los geht's</button>
       <p id="registerError" class="error"></p>
-      <button type="button" class="link-btn" onclick="showLoginForm()">Ich habe schon einen Code</button>
+      <div class="restore-sep">oder</div>
+      <button type="button" id="restoreSetupBtn" class="note-btn ghost" style="width:100%" onclick="document.getElementById('restoreFileSetup').click()">💾 Aus Sicherung wiederherstellen</button>
+      <input type="file" id="restoreFileSetup" accept=".json,application/json" class="hidden" onchange="importBackup(this, true)">
     </div>
-
-    <a href="/" style="margin-top:1rem; color:#ff4f7b; font-size:0.85rem;">← Zurück zu SpotME Caching</a>
-  </div>
-
-  <!-- Credentials Layer: einmalige Anzeige nach Registrierung -->
-  <div id="credentialsLayer" class="hidden overlay">
-    <div class="overlay-card">
-      <h2>🔐 Dein Zugang</h2>
-      <p>Speichere Code und Token jetzt an einem sicheren Ort. Ohne sie kommst du auf einem anderen Gerät nicht mehr rein!</p>
-
-      <label>Code</label>
-      <div class="copy-row">
-        <input type="text" id="credCode" readonly>
-        <button onclick="copyField('credCode')">Kopieren</button>
-      </div>
-
-      <label>Token</label>
-      <div class="copy-row">
-        <input type="text" id="credToken" readonly>
-        <button onclick="copyField('credToken')">Kopieren</button>
-      </div>
-
-      <p id="copyFeedback" class="copy-feedback"></p>
-
-      <button class="primary-btn" onclick="dismissCredentialsLayer()">Gespeichert, weiter zum Chat</button>
-    </div>
+    <a href="landing.html?info=1" style="margin-top:1rem; color:#ff4f7b; font-size:0.85rem;">← Mehr über den Messenger</a>
   </div>
 
   <!-- Chat List -->
@@ -70,20 +58,91 @@
     <div class="chat-list-header">
       <h2>💬 Chats</h2>
       <button class="new-chat-btn" onclick="showNewChatLayer()" title="Neuer Chat">+</button>
-      <button class="logout-btn" onclick="handleLogout()" style="background:none;border:none;color:#ff4f7b;cursor:pointer;font-size:0.85rem;flex-shrink:0;">Abmelden</button>
+      <button class="logout-btn" onclick="showSettings()" style="background:none;border:none;color:#ff4f7b;cursor:pointer;font-size:0.85rem;flex-shrink:0;">⚙︎ Profil</button>
     </div>
+    <div id="backupBar" class="backup-bar hidden"></div>
+    <div id="comicHint" class="backup-bar hidden"></div>
     <div id="chatList" class="chat-list"></div>
+    <div id="closedList"></div>
   </div>
 
   <!-- Neuer Chat: Partner-Code eingeben -->
   <div id="newChatLayer" class="hidden overlay">
     <div class="overlay-card">
       <h2>💬 Neuer Chat</h2>
-      <p>Gib den 6-stelligen Code deines Chatpartners ein.</p>
-      <input type="text" id="newChatCode" maxlength="6" placeholder="6-stelliger Code" style="width:100%;padding:0.6rem 0.75rem;border:1px solid #333;border-radius:8px;background:#1a1f26;color:#fff;font-size:1rem;text-align:center;margin-bottom:0.75rem;">
+      <p>Gib die ID deines Chatpartners ein, z. B. <b>abc-def</b> – oder seinen <b>@Handle</b>.</p>
+      <input type="text" id="newChatCode" maxlength="21" placeholder="abc-def oder @Name" autocapitalize="off" autocomplete="off" style="width:100%;padding:0.6rem 0.75rem;border:1px solid #333;border-radius:8px;background:#1a1f26;color:#fff;font-size:1rem;text-align:center;margin-bottom:0.75rem;">
       <p id="newChatError" class="error"></p>
       <button class="primary-btn" onclick="startNewChat()">Chat starten</button>
       <button type="button" class="link-btn" onclick="hideNewChatLayer()" style="width:100%;text-align:center;">Abbrechen</button>
+    </div>
+  </div>
+
+<!-- Bild-Vorschau vor dem Senden -->
+  <div id="imgPreviewLayer" class="hidden overlay">
+    <div class="overlay-card">
+      <h2>📷 Bild senden?</h2>
+      <img id="imgPreview" class="img-preview" alt="Vorschau">
+      <p style="font-size:0.78rem;">Geht direkt an dein Gegenüber (P2P), nicht über den Server. Standortdaten im Foto werden entfernt.</p>
+      <p id="imgPreviewMsg" class="error"></p>
+      <button class="primary-btn" id="imgSendBtn" onclick="sendPickedImage()">Senden</button>
+      <button class="link-btn" style="width:100%;text-align:center;" onclick="closeImgPreview()">Abbrechen</button>
+    </div>
+  </div>
+  <!-- Bild groß ansehen -->
+  <div id="imgViewLayer" class="hidden overlay" onclick="this.classList.add('hidden')"><img id="imgView" class="img-view" alt=""></div>
+
+  <!-- Profil / Einstellungen -->
+  <div id="backupLayer" class="hidden overlay">
+    <div class="overlay-card">
+      <h2>💾 Sicherung erstellen</h2>
+      <p style="font-size:0.78rem;color:#7a98aa;margin:-0.4rem 0 0.8rem;">Deine Chats und dein Zugang in einer Datei – für Gerätewechsel oder falls etwas verloren geht. Bilder sind nicht enthalten.</p>
+      <label for="bkPass">Passwort (freiwillig)</label>
+      <input type="password" id="bkPass" autocomplete="new-password" placeholder="Leer lassen = ohne Passwort">
+      <p style="font-size:0.7rem;color:#7a98aa;margin:0.2rem 0 0.8rem;">Mit Passwort ist die Datei geschützt. Vergisst du es, lässt sie sich nicht mehr öffnen. Ohne Passwort kann jeder mit der Datei dein Profil übernehmen – bewahre sie sicher auf.</p>
+      <p id="bkMsg" class="copy-feedback"></p>
+      <button class="primary-btn" id="bkGo" onclick="doBackup()">Sichern</button>
+      <button class="link-btn" style="width:100%;text-align:center;" onclick="closeBackupDialog()">Abbrechen</button>
+    </div>
+  </div>
+
+  <div id="settingsLayer" class="hidden overlay">
+    <div class="overlay-card">
+      <h2>👤 Dein Profil</h2>
+      <p style="font-size:0.7rem;color:#7a98aa;margin:-0.4rem 0 0.6rem;">Chat-Version <span id="chatVer">…</span><br><span id="diagInfo"></span></p>
+      <details style="margin:-0.2rem 0 0.8rem;"><summary style="font-size:0.72rem;color:#7a98aa;cursor:pointer;">Verbindungsprotokoll</summary><pre id="diagLog" style="font-size:0.62rem;white-space:pre-wrap;color:#7a98aa;max-height:160px;overflow:auto;margin:0.4rem 0;"></pre><button class="link-btn" style="width:100%;text-align:center;" onclick="copyDiag()">Protokoll kopieren</button></details>
+      <label>Deine ID (gib sie weiter, damit dich andere hinzufügen)</label>
+      <div class="copy-row">
+        <input type="text" id="setId" readonly>
+        <button onclick="copyId()">Kopieren</button>
+      </div>
+      <button class="link-btn" style="width:100%;text-align:center;" onclick="shareId()">🔗 Link teilen</button>
+      <label>Dein @Handle (Kurzlink)</label>
+      <p id="hdInfo" style="font-size:0.72rem;color:#7a98aa;margin:-0.2rem 0 0.5rem;"></p>
+      <div class="copy-row" id="hdRow">
+        <input type="text" id="hdInput" maxlength="21" placeholder="@DeinName" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+        <button onclick="claimHandle()">Speichern</button>
+      </div>
+      <button class="link-btn" id="hdShare" style="width:100%;text-align:center;display:none;" onclick="shareHandle()">🔗 Kurzlink teilen</button>
+      <button class="link-btn" id="hdFree" style="width:100%;text-align:center;display:none;" onclick="releaseHandle()">Handle freigeben</button>
+      <label>Dein Name (die ID bleibt gleich)</label>
+      <div class="copy-row">
+        <input type="text" id="setName" maxlength="40">
+        <button onclick="saveName()">Speichern</button>
+      </div>
+      <p id="setMsg" class="copy-feedback"></p>
+      <label class="comic-row"><input type="checkbox" id="comicToggle" onchange="setComic(this.checked)"> 🗯️ Comic-Stil im Chat (Sprechblasen)</label>
+      <label class="comic-row"><input type="checkbox" id="sndToggle" onchange="setSnd(this.checked)"> 🔊 Töne zu den Sprechblasen</label>
+      <div class="copy-row snd-row"><select id="sndVol" onchange="setSndVol(this.value)"><option value="1">leise</option><option value="2">mittel</option><option value="3">laut</option></select><button onclick="testSnd()">▶ Testen</button></div>
+      <label>Sicherung (Chats + Zugang) – für Gerätewechsel</label>
+      <p id="bkLast" style="font-size:0.7rem;color:#7a98aa;margin:-0.2rem 0 0.5rem;"></p>
+      <div class="copy-row">
+        <button onclick="openBackupDialog()">Sichern</button>
+        <button onclick="document.getElementById('restoreFile').click()">Wiederherstellen</button>
+        <input type="file" id="restoreFile" accept=".json,application/json" class="hidden" onchange="importBackup(this)">
+      </div>
+      <button class="link-btn" style="width:100%;text-align:center;color:#ff4f7b;" onclick="deleteEverything()">🗑 Alles von mir löschen</button>
+      <button class="primary-btn" onclick="hideSettings()">Schließen</button>
     </div>
   </div>
 
@@ -96,9 +155,10 @@
   </div>
   
   <div class="chat-header">
-    <button class="back-btn" onclick="goBackToList()">←</button>
+    <div class="hd-avatar" id="headerAvatar">?</div>
     <div class="header-info">
       <div class="header-name" id="headerName">...</div>
+      <div class="header-code" id="headerCode"></div>
       <div class="header-status" id="headerStatus">
         <span class="p2p-indicator p2p-inactive" id="p2pIndicator">
           <span class="p2p-dot"></span>
@@ -106,11 +166,36 @@
         </span>
       </div>
     </div>
+    <button id="verBtn" class="ver-btn" onclick="toggleVerCard()" aria-label="Verifizieren" title="Verifizieren">✓</button>
+    <button class="back-btn" onclick="goBackToList()" aria-label="Zurück" title="Zurück">✕</button>
   </div>
   
   <div id="messages" class="messages-container"></div>
   
+  <div id="verCard" class="ver-card hidden"></div>
+  <div id="chatNote" class="hidden"></div>
+  <div id="imgHint" class="img-hint off">📷 Bilder nur, wenn ihr beide online seid</div>
+  <div id="moodTray" class="mood-tray hidden">
+    <button data-mood="" onclick="pickMood('')">💬<span>Sagen</span></button>
+    <button data-mood="🗯️" onclick="pickMood('🗯️')">🗯️<span>Denken</span></button>
+    <button data-mood="💥" onclick="pickMood('💥')">💥<span>WOW</span></button>
+    <button data-mood="📣" onclick="pickMood('📣')">📣<span>Rufen</span></button>
+    <button data-mood="🤫" onclick="pickMood('🤫')">🤫<span>Flüstern</span></button>
+    <button data-mood="💗" onclick="pickMood('💗')">💗<span>Lieb</span></button>
+    <button class="mx" data-mood="😱" onclick="pickMood('😱')">😱<span>Schreck</span></button>
+    <button class="mx" data-mood="😡" onclick="pickMood('😡')">😡<span>Wut</span></button>
+    <button class="mx" data-mood="😂" onclick="pickMood('😂')">😂<span>Lachen</span></button>
+    <button class="mx" data-mood="😢" onclick="pickMood('😢')">😢<span>Traurig</span></button>
+    <button class="mx" data-mood="😴" onclick="pickMood('😴')">😴<span>Müde</span></button>
+    <button class="mx" data-mood="💡" onclick="pickMood('💡')">💡<span>Idee</span></button>
+    <button class="mx" data-mood="😎" onclick="pickMood('😎')">😎<span>Cool</span></button>
+    <button class="mx" data-mood="📜" onclick="pickMood('📜')">📜<span>Erzähler</span></button>
+    <button class="more" id="moodMore" onclick="toggleMoodMore()">▸<span>mehr</span></button>
+  </div>
   <div class="input-bar">
+    <button id="moodBtn" class="img-btn" onclick="toggleMoodTray()" aria-label="Stimmung" title="Stimmung der Sprechblase">💬</button>
+    <button id="imgBtn" class="img-btn" onclick="pickImage()" aria-label="Bild senden" title="Bild senden">📷</button>
+    <input type="file" id="imgFile" accept="image/*" class="hidden" onchange="onImagePicked(this)">
     <textarea id="msgInput" placeholder="Nachricht..." rows="1"></textarea>
     <button onclick="sendMessage()">➤</button>
   </div>
@@ -124,7 +209,7 @@ let CODE = null, TOKEN = null, PROFILE = null;
 let CURRENT_ROOM = null, PARTNER_CODE = null, PARTNER_NAME = null;
 let RENDERED_MSG_COUNT = 0; // FIX: für inkrementelles Rendern in renderMessages()
 let POLL_TIMER = null;
-const CHAT_PREFIX = 'sm_local_msg_';
+const CHAT_PREFIX = 'sm_chat_msg_'; // eigener Speicher – getrennt vom Caching-Chat (sm_local_msg_)
 
 // ══════════════════════════════════════════════════════════════════════════
 // LOKALE VERSCHLÜSSELUNG (AES-GCM, Web Crypto API)
@@ -217,6 +302,7 @@ async function saveRoomMessages(room, msgs) {
   try {
     const enc = await encryptLocalData(msgs);
     localStorage.setItem(CHAT_PREFIX + room, enc);
+    noteChange();
   } catch (e) {
     console.error('[Crypto] Verschlüsselung fehlgeschlagen für', room, e);
   }
@@ -227,231 +313,619 @@ let webrtc = null;
 let isP2PConnected = false;
 let p2pConnectionTime = null;
 
-// ── AUTH ──────────────────────────────────────────────────────────────────
-// ── REGISTRIERUNG (neuer Nutzer, eigenständiger Messenger) ────────────────
-function showRegisterForm() {
-  document.getElementById('loginForm').classList.add('hidden');
-  document.getElementById('registerForm').classList.remove('hidden');
-  document.getElementById('loginError').textContent = '';
+// ── PROFIL (automatisch, nur Name) ─────────────────────────────────────────
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+function fmtId(c) { c = String(c || ''); return c.length === 6 ? c.slice(0, 3) + '-' + c.slice(3) : c; }
+function normId(v) { return String(v || '').toLowerCase().replace(/[^a-z]/g, ''); }
+function tfetch(url, opts, ms) {
+  const ctl = new AbortController();
+  const tm = setTimeout(() => ctl.abort(), ms || 10000);
+  return fetch(url, Object.assign({}, opts || {}, { signal: ctl.signal })).finally(() => clearTimeout(tm));
+}
+function getSeen() { try { return JSON.parse(lsGet('sm_chat_seen') || '{}') || {}; } catch (e) { return {}; } }
+function markSeen(room) {
+  if (!room) return;
+  const m = getSeen(); m[room] = Date.now();
+  lsSet('sm_chat_seen', JSON.stringify(m));
+}
+function getContacts() { try { return JSON.parse(lsGet('sm_chat_contacts') || '{}') || {}; } catch (e) { return {}; } }
+function addContact(code, name) {
+  if (!code) return;
+  const c = getContacts();
+  if (c[code] === (name || c[code] || code)) return;
+  c[code] = name || c[code] || code;
+  lsSet('sm_chat_contacts', JSON.stringify(c));
 }
 
-function showLoginForm() {
-  document.getElementById('registerForm').classList.add('hidden');
-  document.getElementById('loginForm').classList.remove('hidden');
-  document.getElementById('registerError').textContent = '';
+// Kontakt-Zustand (nur auf diesem Gerät): req = Anfrage von Unbekannt, heard = er/sie hat geschrieben,
+// talk = ich habe nach dem Hören über den Server geantwortet, paused = Gegenüber hat den Kontakt beendet,
+// out = meine unbeantworteten Erstnachrichten (Server-Limit 3)
+const CLOSED_MARK = '__SM_CLOSED__', FIRST_LIMIT = 3;
+function getMeta() { try { return JSON.parse(lsGet('sm_chat_meta') || '{}') || {}; } catch (e) { return {}; } }
+function metaOf(code) { return getMeta()[code] || {}; }
+function setMeta(code, patch) { if (!code) return; const m = getMeta(); m[code] = Object.assign({}, m[code] || {}, patch); lsSet('sm_chat_meta', JSON.stringify(m)); }
+function delMeta(code) { const m = getMeta(); delete m[code]; lsSet('sm_chat_meta', JSON.stringify(m)); }
+function getClosedByMe() { try { return JSON.parse(lsGet('sm_chat_closed') || '{}') || {}; } catch (e) { return {}; } }
+function setClosedByMe(code, on, name) {
+  const c = getClosedByMe();
+  if (on) c[code] = { ts: Date.now(), name: name || (c[code] && c[code].name) || '' }; else delete c[code];
+  lsSet('sm_chat_closed', JSON.stringify(c));
+}
+// Beendete Kontakte bleiben (ohne Verlauf) in einer Liste, damit man sie wieder öffnen kann – auch ohne notierte ID
+function renderClosedList() {
+  const el = document.getElementById('closedList');
+  if (!el) return;
+  const list = Object.entries(getClosedByMe());
+  if (!CODE || !list.length) { el.innerHTML = ''; return; }
+  const open = el.querySelector('details') && el.querySelector('details').open;
+  el.innerHTML = `<details class="closed-box"${open ? ' open' : ''}><summary>Beendete Kontakte (${list.length})</summary>` + list.map(([code, v]) => {
+    const nm = (v && v.name) || fmtId(code);
+    return `<div class="closed-item"><div class="avatar">${escapeHtml((nm[0] || '?').toUpperCase())}</div>
+      <div class="closed-info"><div class="chat-name">${escapeHtml(nm)}</div><div class="chat-preview">${fmtId(code)}</div></div>
+      <button class="note-btn" data-reopen="${escapeHtml(code)}" data-name="${escapeHtml(nm)}">Wieder öffnen</button>
+      <button class="chat-del" style="opacity:1" data-forget="${escapeHtml(code)}" aria-label="Aus Liste entfernen" title="Aus Liste entfernen">✕</button></div>`;
+  }).join('') + '<p class="closed-hint">Schreibst du dem Kontakt, ist der Chat wieder offen. „✕“ entfernt ihn nur aus dieser Liste.</p></details>';
+}
+async function reopenContact(code, name) {
+  addContact(code, name);
+  const room = [CODE, code].sort().join('-');
+  await openChat(room, code, name);
+}
+// Bestehende Kontakte (vor dieser Version) gelten als vertraut
+function migrateMeta() {
+  const m = getMeta(); let ch = false;
+  for (const code of Object.keys(getContacts())) if (!m[code]) { m[code] = { heard: true, talk: true }; ch = true; }
+  if (ch) lsSet('sm_chat_meta', JSON.stringify(m));
+}
+// Nur Kontakte, die ich kenne und angenommen habe, dürfen direkt (P2P) Text/Bilder schicken
+function acceptP2PFrom(code) {
+  const m = metaOf(code);
+  return !!getContacts()[code] && !m.req && !m.paused && !getClosedByMe()[code];
 }
 
-async function handleRegister() {
-  const name = document.getElementById('registerName').value.trim();
-  const errEl = document.getElementById('registerError');
-  errEl.textContent = '';
-
-  if (!name) {
-    errEl.textContent = 'Bitte einen Anzeigenamen eingeben';
-    return;
-  }
-
-  try {
-    const res = await fetch(`${API}/messenger/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Registrierung fehlgeschlagen');
-    }
-
-    const { code, token, name: registeredName } = await res.json();
-
-    // Automatisch "eingeloggt" – Code+Token lokal hinterlegen
-    CODE = code;
-    TOKEN = token;
-    PROFILE = { code, name: registeredName };
-
-    localStorage.setItem('sm_chat_code', code);
-    localStorage.setItem('sm_chat_token', token);
-    localStorage.setItem('sm_chat_profile', JSON.stringify(PROFILE));
-
-    // Zugangsdaten-Layer zeigen, BEVOR es in den Chat geht
-    document.getElementById('credCode').value = code;
-    document.getElementById('credToken').value = token;
-    document.getElementById('copyFeedback').textContent = '';
-    document.getElementById('credentialsLayer').classList.remove('hidden');
-  } catch (e) {
-    console.error('[Register]', e);
-    errEl.textContent = e.message || 'Registrierung fehlgeschlagen';
-  }
-}
-
-async function copyField(fieldId) {
-  const el = document.getElementById(fieldId);
-  const feedback = document.getElementById('copyFeedback');
-  try {
-    await navigator.clipboard.writeText(el.value);
-    feedback.textContent = '✅ Kopiert!';
-  } catch (e) {
-    // Fallback für ältere WebViews ohne Clipboard-API
-    el.select();
-    el.setSelectionRange(0, 99999);
-    document.execCommand('copy');
-    feedback.textContent = '✅ Kopiert!';
-  }
-  setTimeout(() => { feedback.textContent = ''; }, 2000);
-}
-
-function dismissCredentialsLayer() {
-  document.getElementById('credentialsLayer').classList.add('hidden');
-  document.getElementById('loginScreen').classList.add('hidden');
-  document.getElementById('chatListScreen').style.display = 'block';
-
-  initWebRTC();
-  initPolling();
-  initPushNotifications();
-  renderChatList();
-}
-
-async function handleLogin() {
-  const code = document.getElementById('loginCode').value.trim();
-  const token = document.getElementById('loginToken').value.trim();
-  
-  if (!code || code.length !== 6) {
-    document.getElementById('loginError').textContent = 'Bitte 6-stelligen Code eingeben';
-    return;
-  }
-
-  // Spot Messenger läuft hier als eigenständige App (kein Trust-Kontext
-  // von SpotMe Caching, das seinen eigenen Chat-Layer separat implementiert) →
-  // Token ist Pflicht, sonst könnte jeder mit fremdem Code rein.
-  if (!token) {
-    document.getElementById('loginError').textContent = 'Token erforderlich (siehe SpotMe Caching Profil)';
-    return;
-  }
-  
-  try {
-    // Echte Server-Verifikation (code + token müssen zusammenpassen)
-    const res = await fetch(`${API}/auth/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, token })
-    });
-    if (!res.ok) {
-      throw new Error('Profil nicht gefunden oder ungültiger Token');
-    }
-    
-    const profile = await res.json();
-    
-    CODE = code;
-    TOKEN = token;
-    PROFILE = profile;
-    
-    // localStorage persistieren (im chat Namespace)
-    localStorage.setItem('sm_chat_code', code);
-    if (token) localStorage.setItem('sm_chat_token', token);
-    localStorage.setItem('sm_chat_profile', JSON.stringify(profile));
-    
-    // UI umschalten
-    document.getElementById('loginScreen').classList.add('hidden');
-    document.getElementById('chatListScreen').style.display = 'block';
-    
-    // WebRTC initialisieren (PeerJS Setup)
-    initWebRTC();
-    
-    // Polling für Server-Nachrichten starten
-    initPolling();
-
-    // Web Push registrieren (eigene Subscription für /chat/ Scope)
-    initPushNotifications();
-    
-    // Chat Liste rendern
-    renderChatList();
-
-  } catch (e) {
-    document.getElementById('loginError').textContent = e.message;
-  }
-}
-
-function handleLogout() {
-  // Cleanup WebRTC Verbindung
-  if (webrtc) {
-    webrtc.destroy();
-    webrtc = null;
-  }
-  isP2PConnected = false;
-  p2pConnectionTime = null;
-  
-  // Cleanup Polling
-  if (POLL_TIMER) clearInterval(POLL_TIMER);
-  POLL_TIMER = null;
-  
-  // localStorage bereinigen
-  localStorage.removeItem('sm_chat_code');
-  localStorage.removeItem('sm_chat_token');
-  localStorage.removeItem('sm_chat_profile');
-  
-  // Reset globals
-  CODE = null; TOKEN = null; PROFILE = null;
-  CURRENT_ROOM = null; PARTNER_CODE = null; PARTNER_NAME = null;
-  clearLocalCryptoKey(); // Schlüssel war nur aus CODE+TOKEN abgeleitet, jetzt ungültig
-  
-  // UI zurücksetzen
+function showSetup(prefill, msg) {
   document.getElementById('chatListScreen').style.display = 'none';
   document.getElementById('chatDetailScreen').style.display = 'none';
   document.getElementById('loginScreen').classList.remove('hidden');
-  document.getElementById('loginCode').value = '';
-  document.getElementById('loginToken').value = '';
-  document.getElementById('loginError').textContent = '';
-  showLoginForm(); // falls noch auf Registrieren-Ansicht: zurück zu Login
-  
-  // P2P UI resetten
-  const banner = document.getElementById('p2pBanner');
-  const bannerText = document.getElementById('p2pBannerText');
-  if (banner) {
-    banner.className = 'p2p-banner server';
-    bannerText.textContent = 'Verbindung wird hergestellt...';
-  }
-  }
+  const n = document.getElementById('registerName');
+  if (prefill) n.value = prefill;
+  document.getElementById('registerError').textContent = msg || '';
+}
 
-// Autologin versuchen wenn gespeichert
-async function autoLogin() {
-  const savedCode = localStorage.getItem('sm_chat_code');
-  const savedToken = localStorage.getItem('sm_chat_token');
-  
-  if (!savedCode) return false;
-
-  // Alte Session ohne Token (aus Zeit vor dem Pflicht-Token) → verwerfen,
-  // Nutzer muss sich einmalig mit Token neu einloggen.
-  if (!savedToken) {
-    localStorage.removeItem('sm_chat_code');
-    localStorage.removeItem('sm_chat_profile');
-    return false;
-  }
-  
+async function createProfile() {
+  const name = document.getElementById('registerName').value.trim();
+  const errEl = document.getElementById('registerError');
+  const btn = document.getElementById('setupBtn');
+  errEl.textContent = '';
+  if (!name) { errEl.textContent = 'Bitte einen Namen eingeben'; return; }
+  btn.disabled = true;
   try {
-    const res = await fetch(`${API}/auth/verify`, {
+    const res = await tfetch(`${API}/messenger/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: savedCode, token: savedToken })
+      body: JSON.stringify({ name })
+    }, 20000);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || (res.status === 429 ? 'Zu viele neue Profile von diesem Netzwerk – bitte später erneut versuchen' : 'Anlegen fehlgeschlagen'));
+    }
+    const { code, token, name: n } = await res.json();
+    CODE = code; TOKEN = token; PROFILE = { code, name: n };
+    lsSet('sm_chat_code', code);
+    lsSet('sm_chat_token', token);
+    lsSet('sm_chat_profile', JSON.stringify(PROFILE));
+    startApp();
+  } catch (e) {
+    errEl.textContent = (e && e.name === 'AbortError') ? 'Keine Verbindung – bitte erneut versuchen' : (e.message || 'Anlegen fehlgeschlagen');
+  } finally { btn.disabled = false; }
+}
+
+function startApp() {
+  migrateMeta();
+  applyComic();
+  // Browser soll die Chats nicht bei Platzmangel löschen
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('chatListScreen').style.display = 'block';
+  try { initWebRTC(); } catch (e) { console.warn('[P2P]', e); }
+  initPolling();
+  initPushNotifications();
+  renderChatList();
+  pingVisit();
+  syncVerified(false);
+  const hq = handleFromSearch(location.search);
+  if (hq) {
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    showNewChatLayer();
+    document.getElementById('newChatCode').value = '@' + hq;
+  }
+  const add = new URLSearchParams(location.search).get('add');
+  if (add) {
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    showNewChatLayer();
+    document.getElementById('newChatCode').value = fmtId(normId(add));
+  }
+}
+
+// Besuch melden – hält das Profil am Leben (Aufräumen nach 30 Tagen ohne Besuch)
+let LAST_VISIT_PING = 0;
+function pingVisit() {
+  if (!CODE || !TOKEN || Date.now() - LAST_VISIT_PING < 6 * 3600 * 1000) return;
+  LAST_VISIT_PING = Date.now();
+  tfetch(`${API}/profile/visit`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: CODE, token: TOKEN })
+  }).catch(() => { LAST_VISIT_PING = 0; });
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pingVisit(); });
+
+// Start: gespeichertes Profil sofort nutzen (auch offline), Server prüft im Hintergrund
+async function autoLogin() {
+  const savedCode = lsGet('sm_chat_code');
+  const savedToken = lsGet('sm_chat_token');
+  if (!savedCode || !savedToken) { showSetup(); return false; }
+  CODE = savedCode; TOKEN = savedToken;
+  try { PROFILE = JSON.parse(lsGet('sm_chat_profile') || 'null'); } catch (e) { PROFILE = null; }
+  if (!PROFILE || !PROFILE.name) PROFILE = { code: CODE, name: CODE };
+  startApp();
+  verifyProfile();
+  return true;
+}
+
+async function verifyProfile() {
+  try {
+    const res = await tfetch(`${API}/auth/verify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: CODE, token: TOKEN })
     });
+    if (res.status === 403) return profileLost();
     if (res.ok) {
-      CODE = savedCode;
-      TOKEN = savedToken;
-      PROFILE = await res.json();
-      
-      document.getElementById('loginScreen').classList.add('hidden');
-      document.getElementById('chatListScreen').style.display = 'block';
-      
-      initWebRTC();
-      initPolling();
-      initPushNotifications();
-      renderChatList();
-      return true;
+      const p = await res.json();
+      if (p && p.name) { PROFILE = { code: CODE, name: p.name }; lsSet('sm_chat_profile', JSON.stringify(PROFILE)); }
+    }
+  } catch (e) { /* offline – egal */ }
+}
+
+// Profil gibt es auf dem Server nicht mehr (z. B. 30 Tage ohne Besuch) → neu anlegen lassen
+function profileLost() {
+  const oldName = PROFILE && PROFILE.name;
+  stopRuntime();
+  imgDeleteAll();
+  wipeLocal();
+  showSetup(oldName, 'Dein altes Profil ist abgelaufen. Lege es kurz neu an – du bekommst eine neue ID.');
+}
+
+function stopRuntime() {
+  if (webrtc) { try { webrtc.destroy(); } catch (e) {} webrtc = null; }
+  isP2PConnected = false; p2pConnectionTime = null;
+  if (POLL_TIMER) clearInterval(POLL_TIMER);
+  POLL_TIMER = null;
+}
+
+function wipeLocal() {
+  try {
+    Object.keys(localStorage).filter(k => k.startsWith('sm_chat_')).forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
+  CODE = null; TOKEN = null; PROFILE = null;
+  CURRENT_ROOM = null; PARTNER_CODE = null; PARTNER_NAME = null;
+  clearLocalCryptoKey();
+}
+
+// ── BILDER (nur P2P, nur wenn beide online) ──────────────────────────────
+const IMG_DB = 'SpotChatImg';
+function imgDb() {
+  return new Promise((res, rej) => {
+    const q = indexedDB.open(IMG_DB, 1);
+    q.onupgradeneeded = () => q.result.createObjectStore('img');
+    q.onsuccess = () => res(q.result);
+    q.onerror = () => rej(q.error);
+  });
+}
+function imgKey(room, iid) { return `${CODE}|${room}|${iid}`; }
+async function imgPut(room, iid, dataUrl) {
+  const enc = await encryptLocalData(dataUrl);
+  const db = await imgDb();
+  await new Promise((res, rej) => { const t = db.transaction('img', 'readwrite'); t.objectStore('img').put(enc, imgKey(room, iid)); t.oncomplete = res; t.onerror = () => rej(t.error); });
+  db.close();
+}
+async function imgGet(room, iid) {
+  try {
+    const db = await imgDb();
+    const enc = await new Promise((res) => { const g = db.transaction('img').objectStore('img').get(imgKey(room, iid)); g.onsuccess = () => res(g.result); g.onerror = () => res(null); });
+    db.close();
+    return enc ? await decryptLocalData(enc) : null;
+  } catch (e) { return null; }
+}
+async function imgDeleteRoom(room) {
+  try {
+    const db = await imgDb(); const prefix = `${CODE}|${room}|`;
+    await new Promise((res) => {
+      const t = db.transaction('img', 'readwrite'), st = t.objectStore('img');
+      st.openKeyCursor().onsuccess = (e) => { const c = e.target.result; if (c) { if (String(c.key).startsWith(prefix)) st.delete(c.key); c.continue(); } };
+      t.oncomplete = res; t.onerror = res;
+    });
+    db.close();
+  } catch (e) {}
+}
+function imgDeleteAll() { try { indexedDB.deleteDatabase(IMG_DB); } catch (e) {} }
+
+// Kanal zum aktuellen Gegenüber offen? → beide sind online und direkt verbunden
+function canSendImage() {
+  const m = metaOf(PARTNER_CODE);
+  return !!(webrtc && PARTNER_CODE && !m.paused && !m.req && m.heard && typeof webrtc.isConnectedTo === 'function' && webrtc.isConnectedTo(PARTNER_CODE));
+}
+function refreshImageState() {
+  const btn = document.getElementById('imgBtn'), hint = document.getElementById('imgHint');
+  if (!btn || !hint) return;
+  const on = canSendImage();
+  btn.classList.toggle('on', on);
+  hint.className = 'img-hint ' + (on ? 'on' : 'off');
+  // Nach 25 s ohne P2P: häufigster Grund ist die Energiesparfunktion des Browsers (friert Hintergrund-Apps ein)
+  const mm = metaOf(PARTNER_CODE);
+  if (!on && (mm.req || mm.paused || !mm.heard)) {
+    hint.className = 'img-hint off';
+    hint.textContent = mm.paused ? '📷 Chat pausiert' : '📷 Bilder gehen erst, nachdem dein Kontakt geantwortet hat';
+    return;
+  }
+  const slow = !on && CHAT_OPENED_AT && (Date.now() - CHAT_OPENED_AT > 25000);
+  hint.textContent = on
+    ? '📷 Ihr seid beide online – Bilder möglich'
+    : slow
+      ? '📷 Noch kein P2P. Beide müssen den Chat offen haben. Tipp: Akku-/Energiespar-Einstellung des Browsers auf „Keine Beschränkungen“ stellen.'
+      : '📷 Bilder nur, wenn ihr beide online seid (grünes P2P)';
+}
+let CHAT_OPENED_AT = 0;
+setInterval(refreshImageState, 1500);
+
+let PICKED_IMG = null;
+function pickImage() {
+  if (!canSendImage()) {
+    const h = document.getElementById('imgHint');
+    h.textContent = '⚠️ Gerade nicht möglich: Bilder gehen nur direkt, wenn ihr BEIDE im Chat online seid. Bleibt es so: Akku-Einstellung des Browsers auf „Keine Beschränkungen“.';
+    h.className = 'img-hint warn';
+    setTimeout(refreshImageState, 6000);
+    return;
+  }
+  document.getElementById('imgFile').click();
+}
+// Bild verkleinern: längste Seite 1280 px, JPEG – das Neuzeichnen entfernt alle Foto-Metadaten (z. B. GPS)
+async function shrinkImage(file) {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const k = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(bmp.width * k)); cv.height = Math.max(1, Math.round(bmp.height * k));
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  if (bmp.close) bmp.close();
+  let q = 0.82, url = cv.toDataURL('image/jpeg', q);
+  while (url.length > 420000 && q > 0.35) { q -= 0.1; url = cv.toDataURL('image/jpeg', q); }
+  return url;
+}
+async function onImagePicked(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  try {
+    PICKED_IMG = await shrinkImage(f);
+    document.getElementById('imgPreview').src = PICKED_IMG;
+    document.getElementById('imgPreviewMsg').textContent = '';
+    document.getElementById('imgSendBtn').disabled = false;
+    document.getElementById('imgPreviewLayer').classList.remove('hidden');
+  } catch (e) { alert('Dieses Bild konnte nicht gelesen werden.'); }
+}
+function closeImgPreview() { PICKED_IMG = null; document.getElementById('imgPreviewLayer').classList.add('hidden'); }
+
+async function sendPickedImage() {
+  const dataUrl = PICKED_IMG, room = CURRENT_ROOM, partner = PARTNER_CODE;
+  if (!dataUrl || !room) return;
+  const msgEl = document.getElementById('imgPreviewMsg'), btn = document.getElementById('imgSendBtn');
+  if (!canSendImage()) { msgEl.textContent = 'Dein Gegenüber ist nicht mehr direkt verbunden – Bild nicht gesendet.'; return; }
+  btn.disabled = true; msgEl.textContent = 'Sende …';
+  const ts = Date.now(), iid = 'i' + ts.toString(36) + Math.random().toString(36).slice(2, 7);
+  const ok = await webrtc.sendImage(dataUrl, ts, iid);
+  if (!ok) { msgEl.textContent = 'Nicht gesendet – die Verbindung ist weg. Bitte später erneut versuchen.'; btn.disabled = false; return; }
+  await imgPut(room, iid, dataUrl);
+  const msgs = await loadRoomMessages(room);
+  msgs.push({ from: CODE, fromName: PROFILE?.name || CODE, kind: 'image', iid, text: '📷 Bild', ts, status: 'sent' });
+  await saveRoomMessages(room, msgs);
+  closeImgPreview();
+  if (room === CURRENT_ROOM) await renderMessages(true);
+}
+
+// Bild per P2P angekommen
+async function onImageReceived(img) {
+  const room = [CODE, img.from].sort().join('-');
+  if (!acceptP2PFrom(img.from)) return;
+  if (img.fromName) addContact(img.from, img.fromName);
+  setMeta(img.from, { heard: true, out: 0 });
+  await imgPut(room, img.id, img.dataUrl);
+  const msgs = await loadRoomMessages(room);
+  if (!msgs.some(m => m.iid === img.id)) {
+    msgs.push({ from: img.from, fromName: img.fromName, kind: 'image', iid: img.id, text: '📷 Bild', ts: img.ts || Date.now() });
+    await saveRoomMessages(room, msgs);
+  }
+  if (room === CURRENT_ROOM) { markSeen(room); await renderMessages(true); }
+  renderChatList();
+}
+
+// Bilder in den Blasen nachladen (empfangene erst unscharf, Tippen zeigt sie)
+async function hydrateImages(container) {
+  const nodes = container.querySelectorAll('img[data-iid]:not([data-done])');
+  for (const el of nodes) {
+    el.dataset.done = '1';
+    const url = await imgGet(container.dataset.room, el.dataset.iid);
+    if (url) el.src = url; else el.replaceWith(Object.assign(document.createElement('span'), { textContent: '🖼 Bild nicht mehr vorhanden', className: 'img-gone' }));
+  }
+}
+document.addEventListener('click', (e) => {
+  const im = e.target.closest && e.target.closest('img.chat-img');
+  if (!im || !im.src) return;
+  if (im.classList.contains('blur')) { im.classList.remove('blur'); return; }
+  document.getElementById('imgView').src = im.src;
+  document.getElementById('imgViewLayer').classList.remove('hidden');
+});
+
+// ── PROFIL-EINSTELLUNGEN ──────────────────────────────────────────────────
+async function showVersion() {
+  const el = document.getElementById('chatVer');
+  try {
+    const keys = await caches.keys();
+    const k = keys.filter(x => /^spot-static-chat-v/.test(x)).sort().pop();
+    el.textContent = k ? k.replace('spot-static-chat-v', '') : 'unbekannt';
+  } catch (e) { el.textContent = 'unbekannt'; }
+}
+function showDiag() {
+  const el = document.getElementById('diagInfo');
+  if (!el) return;
+  if (!webrtc) { el.textContent = 'Direktverbindung: nicht verfügbar'; return; }
+  const ready = webrtc.isPeerReady();
+  el.textContent = 'Direktverbindung: ' + (ready ? '✅ bereit' : '⏳ meldet sich an') + (webrtc.lastError ? ' · letzter Fehler: ' + webrtc.lastError : '');
+}
+function diagText() {
+  const l = (webrtc && webrtc.log) ? webrtc.log.slice() : [];
+  return ['Chat ' + (document.getElementById('chatVer').textContent), 'Sichtbar: ' + document.visibilityState, 'Online: ' + navigator.onLine, 'Partner: ' + (PARTNER_CODE || '-')].concat(l).join('\n');
+}
+async function copyDiag() { try { await navigator.clipboard.writeText(diagText()); setMsg('✅ Protokoll kopiert'); } catch (e) { setMsg('Kopieren nicht möglich'); } }
+function showSettings() {
+  showVersion();
+  showDiag();
+  setTimeout(() => { const p = document.getElementById('diagLog'); if (p) p.textContent = diagText(); }, 200);
+  document.getElementById('setId').value = fmtId(CODE);
+  document.getElementById('setName').value = (PROFILE && PROFILE.name) || '';
+  document.getElementById('setMsg').textContent = '';
+  document.getElementById('comicToggle').checked = comicOn();
+  document.getElementById('sndToggle').checked = sndOn();
+  document.getElementById('sndVol').value = sndVol();
+  { const b = bkInfo(); document.getElementById('bkLast').textContent = b.ts ? `Letzte Sicherung: ${fmtDay(b.ts)}${changesSince() ? ' · seitdem Neues' : ' · alles gesichert'}` : 'Noch keine Sicherung'; }
+  document.getElementById('settingsLayer').classList.remove('hidden');
+  loadHandleInfo();
+}
+function hideSettings() { document.getElementById('settingsLayer').classList.add('hidden'); }
+function setMsg(t) { const el = document.getElementById('setMsg'); el.textContent = t; setTimeout(() => { if (el.textContent === t) el.textContent = ''; }, 3000); }
+
+
+// ── @HANDLE (Kurzlink /chat/?Name) ─────────────────────────────────────────
+let HD = { count: 0, min: 3, handle: null };
+const HANDLE_RE = /^[A-Za-z0-9][A-Za-z0-9_]{2,19}$/; // auch nur Zahlen (wie alte ICQ-Nummern)
+const RESERVED_Q = ['add', 'neu', 'info', 'h', 'ref'];
+function handleFromSearch(search) {
+  try { for (const [k, v] of new URLSearchParams(search)) if (v === '' && HANDLE_RE.test(k) && !RESERVED_Q.includes(k.toLowerCase())) return k; } catch (e) {}
+  return '';
+}
+function handleLink(hd) { return `${location.origin}/chat/?${hd}`; }
+async function loadHandleInfo() {
+  await syncVerified(true);
+  try {
+    const r = await tfetch(`${API}/messenger/verified/${CODE}?token=${encodeURIComponent(TOKEN)}`, {}, 10000);
+    if (r.ok) HD = await r.json();
+  } catch (e) {}
+  renderHandleInfo();
+}
+function renderHandleInfo() {
+  const info = document.getElementById('hdInfo'), row = document.getElementById('hdRow');
+  const share = document.getElementById('hdShare'), free = document.getElementById('hdFree'), inp = document.getElementById('hdInput');
+  if (!info) return;
+  if (HD.handle) {
+    info.innerHTML = `Dein Kurzlink: <b>${escapeHtml(handleLink(HD.handle).replace(/^https?:\/\//, ''))}</b>`;
+    row.style.display = ''; share.style.display = ''; free.style.display = '';
+    inp.value = '@' + HD.handle;
+  } else if ((HD.count || 0) >= (HD.min || 3)) {
+    info.textContent = `Du hast ${HD.count} verifizierte Kontakte ✔ – such dir einen @Handle aus. Er ersetzt deine ID nicht, du hast dann einen kurzen Link.`;
+    row.style.display = ''; share.style.display = 'none'; free.style.display = 'none';
+  } else {
+    info.textContent = `Ab ${HD.min || 3} verifizierten Kontakten (grüner Haken ✔) kannst du dir einen @Handle aussuchen. Aktuell: ${HD.count || 0} – zählt, sobald beide Seiten online waren und den Haken haben.`;
+    row.style.display = 'none'; share.style.display = 'none'; free.style.display = 'none';
+  }
+}
+async function claimHandle() {
+  const v = document.getElementById('hdInput').value.trim().replace(/^@/, '');
+  if (!HANDLE_RE.test(v)) return setMsg('3–20 Zeichen: Buchstaben, Zahlen, _ (auch nur Zahlen, wie früher bei ICQ)');
+  try {
+    const r = await tfetch(`${API}/messenger/handle`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: CODE, token: TOKEN, handle: v })
+    }, 15000);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return setMsg(j.error || 'Konnte nicht gespeichert werden');
+    HD.handle = j.handle; renderHandleInfo(); setMsg('✅ @' + j.handle + ' gehört dir');
+  } catch (e) { setMsg('Keine Verbindung zum Server'); }
+}
+async function releaseHandle() {
+  if (!confirm('@' + HD.handle + ' freigeben? Dein Kurzlink funktioniert dann nicht mehr, deine ID bleibt.')) return;
+  try {
+    const r = await tfetch(`${API}/messenger/handle`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: CODE, token: TOKEN })
+    }, 15000);
+    if (!r.ok) throw new Error('x');
+    HD.handle = null; document.getElementById('hdInput').value = ''; renderHandleInfo(); setMsg('Handle freigegeben');
+  } catch (e) { setMsg('Konnte nicht freigegeben werden'); }
+}
+async function shareHandle() {
+  if (!HD.handle) return;
+  const url = handleLink(HD.handle);
+  const text = `Schreib mir im Spot-Chat: @${HD.handle}`;
+  try {
+    if (navigator.share) { await navigator.share({ title: 'Spot-Chat', text, url }); return; }
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    setMsg('✅ Kurzlink kopiert');
+  } catch (e) {}
+}
+
+async function copyId() {
+  const el = document.getElementById('setId');
+  try { await navigator.clipboard.writeText(el.value); } catch (e) { el.select(); try { document.execCommand('copy'); } catch (e2) {} }
+  setMsg('✅ Kopiert');
+}
+async function shareId() {
+  const url = `${location.origin}/chat/?add=${CODE}`;
+  const text = `Schreib mir im Spot-Chat – meine ID: ${fmtId(CODE)}`;
+  try {
+    if (navigator.share) { await navigator.share({ title: 'Spot-Chat', text, url }); return; }
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    setMsg('✅ Link kopiert');
+  } catch (e) {}
+}
+
+async function saveName() {
+  const name = document.getElementById('setName').value.trim();
+  if (!name) return setMsg('Bitte einen Namen eingeben');
+  try {
+    const res = await tfetch(`${API}/messenger/rename`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: CODE, token: TOKEN, name })
+    });
+    if (!res.ok) throw new Error();
+    PROFILE = { code: CODE, name };
+    lsSet('sm_chat_profile', JSON.stringify(PROFILE));
+    setMsg('✅ Name gespeichert');
+  } catch (e) { setMsg('Keine Verbindung – bitte später erneut versuchen'); }
+}
+
+// ── Sicherung ───────────────────────────────────────────────────────────────
+const BK_KEY = 'sm_chat_bk', CHG_KEY = 'sm_chat_chg', SNOOZE_KEY = 'sm_chat_bk_snooze';
+function bkInfo() { try { return JSON.parse(lsGet(BK_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function chgNow() { return parseInt(lsGet(CHG_KEY) || '0', 10) || 0; }
+function noteChange() { lsSet(CHG_KEY, String(chgNow() + 1)); }
+function changesSince() { return Math.max(0, chgNow() - (bkInfo().chg || 0)); }
+function fmtDay(ts) { const d = new Date(ts); return `${d.getDate()}.${d.getMonth() + 1}.`; }
+// Erinnerung: es gibt Neues seit der letzten Sicherung (nie gesichert → gleich; sonst höchstens einmal am Tag)
+function backupDue() {
+  if (!CODE || changesSince() <= 0) return false;
+  if (Date.now() < (parseInt(lsGet(SNOOZE_KEY) || '0', 10) || 0)) return false;
+  const b = bkInfo();
+  return !b.ts || Date.now() - b.ts >= 86400000 || changesSince() >= 40;
+}
+function updateBackupBar() {
+  const el = document.getElementById('backupBar');
+  if (!el) return;
+  if (!backupDue()) { el.className = 'backup-bar hidden'; el.innerHTML = ''; return; }
+  const b = bkInfo();
+  el.className = 'backup-bar';
+  el.innerHTML = `<span>💾 ${b.ts ? 'Neue Chats seit deiner Sicherung vom ' + fmtDay(b.ts) + '.' : 'Noch keine Sicherung – schütze deine Chats vor Verlust.'}</span>
+    <span class="bk-btns"><button class="note-btn" onclick="openBackupDialog()">Jetzt sichern</button><button class="note-btn ghost" onclick="snoozeBackup()">Später</button></span>`;
+}
+function snoozeBackup() { lsSet(SNOOZE_KEY, String(Date.now() + 86400000)); updateBackupBar(); }
+let BK_FROM_SETTINGS = false;
+function openBackupDialog() {
+  BK_FROM_SETTINGS = !document.getElementById('settingsLayer').classList.contains('hidden');
+  document.getElementById('bkPass').value = '';
+  document.getElementById('bkMsg').textContent = '';
+  document.getElementById('settingsLayer').classList.add('hidden');
+  document.getElementById('backupLayer').classList.remove('hidden');
+}
+function closeBackupDialog() { document.getElementById('backupLayer').classList.add('hidden'); }
+function bkB64(buf) { let s = ''; new Uint8Array(buf).forEach(b => s += String.fromCharCode(b)); return btoa(s); }
+function bkUnB64(str) { const s = atob(str); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+async function bkKey(pass, salt, it) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: it, hash: 'SHA-256' }, k, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function bkEncrypt(text, pass) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), it = 200000;
+  const key = await bkKey(pass, salt, it);
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text));
+  return { app: 'spot-chat', v: 2, enc: { kdf: 'PBKDF2-SHA256', it, salt: bkB64(salt), iv: bkB64(iv), data: bkB64(data) } };
+}
+async function bkDecrypt(obj, pass) {
+  const e = obj.enc, key = await bkKey(pass, bkUnB64(e.salt), e.it);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bkUnB64(e.iv) }, key, bkUnB64(e.data));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+function bkDownload(file) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file); a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+async function doBackup() {
+  const btn = document.getElementById('bkGo'), msg = document.getElementById('bkMsg');
+  const pass = document.getElementById('bkPass').value;
+  const prevBk = lsGet(BK_KEY), prevSnooze = lsGet(SNOOZE_KEY);
+  btn.disabled = true; msg.textContent = '';
+  try {
+    // Sicherungsstand zuerst setzen, damit er auch in der Datei steht
+    lsSet(BK_KEY, JSON.stringify({ ts: Date.now(), chg: chgNow() }));
+    lsSet(SNOOZE_KEY, '0');
+    const data = { app: 'spot-chat', v: 1, items: {} };
+    Object.keys(localStorage).filter(k => k.startsWith('sm_chat_')).forEach(k => { data.items[k] = localStorage.getItem(k); });
+    const out = pass ? await bkEncrypt(JSON.stringify(data), pass) : data;
+    const file = new File([JSON.stringify(out)], `spot-chat-sicherung-${new Date().toISOString().slice(0, 10)}.json`, { type: 'application/json' });
+    let done = false;
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'SpotMe Messenger – Sicherung' }); done = true; }
+      catch (e) { if (e && e.name === 'AbortError') done = false; else { bkDownload(file); done = true; } }
+    } else { bkDownload(file); done = true; }
+    if (!done) {
+      if (prevBk === null) localStorage.removeItem(BK_KEY); else lsSet(BK_KEY, prevBk);
+      if (prevSnooze === null) localStorage.removeItem(SNOOZE_KEY); else lsSet(SNOOZE_KEY, prevSnooze);
+      msg.textContent = 'Abgebrochen – nichts gesichert.';
+    } else {
+      closeBackupDialog(); updateBackupBar();
+      if (BK_FROM_SETTINGS) setTimeout(() => { try { showSettings(); setMsg(pass ? '✅ Gesichert (mit Passwort)' : '✅ Gesichert – sicher aufbewahren, die Datei enthält deinen Zugang'); } catch (e) {} }, 0);
     }
   } catch (e) {
-    console.error('Autologin failed:', e);
+    console.error('[Backup]', e);
+    if (prevBk === null) localStorage.removeItem(BK_KEY); else lsSet(BK_KEY, prevBk);
+    msg.textContent = 'Sicherung fehlgeschlagen.';
   }
-  return false;
+  btn.disabled = false;
+}
+async function importBackup(input, fromSetup) {
+  const say = fromSetup ? (t => { document.getElementById('registerError').textContent = t; }) : setMsg;
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  try {
+    let data = JSON.parse(await f.text());
+    if (data && data.enc) {
+      const pass = prompt('Diese Sicherung ist mit einem Passwort geschützt. Passwort:');
+      if (pass === null) return;
+      try { data = await bkDecrypt(data, pass); } catch (e) { say('Passwort falsch oder Datei beschädigt'); return; }
+    }
+    const items = data && data.app === 'spot-chat' && data.items;
+    if (!items || !items.sm_chat_code || !items.sm_chat_token) throw new Error();
+    if (!fromSetup && !confirm('Aktuelles Profil auf diesem Gerät durch die Sicherung ersetzen?')) return;
+    stopRuntime(); wipeLocal();
+    Object.keys(items).forEach(k => { if (k.startsWith('sm_chat_')) lsSet(k, String(items[k])); });
+    location.reload();
+  } catch (e) { say('Datei nicht lesbar – bitte die Sicherungsdatei (.json) wählen'); }
+}
+
+async function deleteEverything() {
+  if (!confirm('Wirklich ALLES löschen? Profil, ID, Chats auf diesem Gerät und alle Daten auf dem Server. Das geht nicht rückgängig.')) return;
+  try {
+    const res = await tfetch(`${API}/account/${CODE}`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: TOKEN })
+    });
+    if (!res.ok && res.status !== 403) throw new Error();
+  } catch (e) { return setMsg('Keine Verbindung – Server-Daten konnten nicht gelöscht werden. Bitte später erneut.'); }
+  stopRuntime(); imgDeleteAll(); wipeLocal();
+  hideSettings();
+  try { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r => r.unregister())); } catch (e) {}
+  location.reload();
 }
 
 // ── WEB PUSH SETUP ────────────────────────────────────────────────────────
@@ -528,6 +1002,7 @@ async function initWebRTC() {
   console.log('[WebRTC] Instantiated with User:', PROFILE?.name || CODE);
 
   webrtc = new window.SpotMeWebRTC(CODE, TOKEN, PROFILE?.name || CODE);
+  webrtc.acceptFrom = acceptP2PFrom; // Anfragen/pausierte/beendete Kontakte kommen nicht per P2P durch
 
   // ── NEU: Peer ist beim Server registriert ──
   webrtc.onPeerReady = (id) => {
@@ -540,15 +1015,19 @@ async function initWebRTC() {
     isP2PConnected = true;
     p2pConnectionTime = new Date();
     updateP2PUI(true, 'P2P Aktiv');
+    refreshImageState();
   };
 
   // ── Nachricht via P2P empfangen ──
   webrtc.onMessage = async (msg) => {
     console.log('[Chat] P2P Nachricht empfangen:', msg);
+    if (String(msg.text || '').startsWith(VCTRL)) { handleControl(msg.from, msg.text); return; }
 
     // WICHTIG: Room aus Absender-Code berechnen, nicht CURRENT_ROOM nutzen
     // (Nachricht kann ankommen, wenn Chat gar nicht geöffnet ist)
     const room = [CODE, msg.from].sort().join('-');
+    if (msg.fromName) addContact(msg.from, msg.fromName);
+    setMeta(msg.from, { heard: true, out: 0 });
 
     const msgs = await loadRoomMessages(room);
 
@@ -567,10 +1046,12 @@ async function initWebRTC() {
         ts: msg.ts || Date.now()
       });
       await saveRoomMessages(room, msgs);
+      playIncoming(msg.text);
     }
 
     // UI aktualisieren
     if (room === CURRENT_ROOM) {
+      markSeen(room);
       renderMessages(true);
     }
     renderChatList();
@@ -595,18 +1076,17 @@ async function initWebRTC() {
     console.log('[Chat] P2P Verbindung getrennt:', peerId);
     isP2PConnected = false;
     p2pConnectionTime = null;
-    updateP2PUI(false, 'Verbindung getrennt');
+    updateP2PUI(false, 'Server-Modus');
+    refreshImageState();
   };
+
+  webrtc.onImage = (img) => { onImageReceived(img).catch(e => console.warn('[Chat] Bild speichern:', e)); };
 
   // ── Fehler ──
   webrtc.onError = (err) => {
-    console.error('[Chat] WebRTC Error:', err);
-    // peer-unavailable ist nicht kritisch — Partner vielleicht noch nicht online
-    if (err.type === 'peer-unavailable') {
-      updateP2PUI(false, 'Partner nicht online');
-      return;
-    }
-    updateP2PUI(false, 'Fehler: ' + (err.type || 'unknown'));
+    // Technische Fehler gehören ins Log, nicht in die Anzeige – der Text-Chat läuft über den Server weiter.
+    // (peer-unavailable = Partner gerade nicht im Chat, völlig normal)
+    console.warn('[Chat] WebRTC:', err && (err.type || err.message || err));
   };
 
   // ── NEU: Peer SOFORT beim Login registrieren ──
@@ -626,103 +1106,208 @@ function hideNewChatLayer() {
 }
 
 async function startNewChat() {
-  const partnerCode = document.getElementById('newChatCode').value.trim();
+  const raw = document.getElementById('newChatCode').value.trim();
   const errEl = document.getElementById('newChatError');
   errEl.textContent = '';
-
-  if (!/^\d{6}$/.test(partnerCode)) {
-    errEl.textContent = 'Bitte 6-stelligen Code eingeben';
-    return;
-  }
-  if (partnerCode === CODE) {
-    errEl.textContent = 'Das ist dein eigener Code';
-    return;
-  }
+  let partnerCode = '', partnerName = '', handleUsed = '';
+  const looksId = /^[a-z]{3}-?[a-z]{3}$/i.test(raw);
 
   try {
-    // Öffentlicher Profil-Check – existiert der Code überhaupt?
-    const res = await fetch(`${API}/profile/${partnerCode}?spot=caching`);
-    if (!res.ok) {
-      errEl.textContent = 'Kein Nutzer mit diesem Code gefunden';
-      return;
+    if (raw.startsWith('@') || (!looksId && HANDLE_RE.test(raw))) {
+      // @Handle → ID auflösen
+      const hn = raw.replace(/^@/, '');
+      if (!HANDLE_RE.test(hn)) { errEl.textContent = 'Bitte eine ID wie abc-def oder einen @Handle eingeben'; return; }
+      const r = await tfetch(`${API}/messenger/handle/${encodeURIComponent(hn)}`);
+      if (!r.ok) { errEl.textContent = r.status === 404 ? `Keinen Handle @${hn} gefunden` : r.status === 429 ? 'Zu viele Anfragen – gleich nochmal versuchen' : 'Server gerade nicht erreichbar'; return; }
+      const j = await r.json();
+      partnerCode = j.code; partnerName = j.name || j.handle; handleUsed = j.handle;
+      if (partnerCode === CODE) { errEl.textContent = 'Das ist dein eigener Handle'; return; }
+    } else {
+      partnerCode = normId(raw);
+      if (!/^[a-z]{6}$/.test(partnerCode)) { errEl.textContent = 'Bitte eine ID wie abc-def oder einen @Handle eingeben'; return; }
+      if (partnerCode === CODE) { errEl.textContent = 'Das ist deine eigene ID'; return; }
+      // Öffentlicher Profil-Check – existiert der Code überhaupt?
+      const res = await tfetch(`${API}/profile/${partnerCode}?spot=messenger`);
+      if (!res.ok) {
+        errEl.textContent = res.status === 404 ? 'Keine Person mit dieser ID gefunden' : 'Server gerade nicht erreichbar';
+        return;
+      }
+      const profile = await res.json();
+      partnerName = profile.name || partnerCode;
     }
-    const profile = await res.json();
-    const partnerName = profile.name || partnerCode;
 
     hideNewChatLayer();
+    addContact(partnerCode, partnerName);
+    if (handleUsed) setMeta(partnerCode, { h: handleUsed });
 
     const room = [CODE, partnerCode].sort().join('-');
     await openChat(room, partnerCode, partnerName);
   } catch (e) {
     console.error('[NewChat]', e);
-    errEl.textContent = 'Fehler beim Prüfen des Codes';
+    errEl.textContent = 'Keine Verbindung – ID konnte nicht geprüft werden';
   }
 }
 
 // ── CHAT LIST ─────────────────────────────────────────────────────────────
 async function renderChatList() {
+  renderClosedList();
+  updateBackupBar();
+  updateComicHint();
   const container = document.getElementById('chatList');
-  if (!CODE) { 
-    container.innerHTML = '<p class="text-center" style="padding:2rem;color:var(--muted2);">Keine Chats</p>'; 
-    return; 
+  if (!CODE) {
+    container.innerHTML = '<p class="text-center" style="padding:2rem;color:var(--muted2);">Keine Chats</p>';
+    return;
   }
-  
-  // Alle Chats aus localStorage finden
-  const chats = [];
+  const contacts = getContacts();
+  const seen = getSeen();
+  const byRoom = {};
+  const metaAll = getMeta();
+  for (const [code, name] of Object.entries(contacts)) {
+    byRoom[[CODE, code].sort().join('-')] = { partnerCode: code, partnerName: name, lastText: 'Noch keine Nachricht', lastTs: 0, timeStr: '', unread: 0 };
+  }
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (!key.startsWith(CHAT_PREFIX)) continue;
-    
-    const room = key.replace(CHAT_PREFIX, '');
+    if (!key || !key.startsWith(CHAT_PREFIX)) continue;
+    const room = key.slice(CHAT_PREFIX.length);
     const codes = room.split('-');
     if (!codes.includes(CODE)) continue;
-    
     const partnerCode = codes.find(c => c !== CODE);
     if (!partnerCode) continue;
-    
     let msgs = [];
     try { msgs = await decryptLocalData(localStorage.getItem(key)); } catch (e) { msgs = []; }
     if (!Array.isArray(msgs) || !msgs.length) continue;
-    
-    const lastMsg = msgs[msgs.length - 1];
-    const time = new Date(lastMsg.ts);
-    const timeStr = time.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
-    const preview = lastMsg.text.length > 30 ? lastMsg.text.slice(0, 30) + '…' : lastMsg.text;
-    
-    chats.push({
-      room, partnerCode, partnerName: lastMsg.fromName || partnerCode,
-      lastText: preview, lastTs: lastMsg.ts, timeStr, unread: 0
-    });
+    const last = msgs[msgs.length - 1];
+    const pv = parseMood(last.text || '');
+    const pvt = pv.text.length > 30 ? pv.text.slice(0, 30) + '…' : pv.text;
+    const prev = (pv.mood !== 'speech' && pv.mood !== 'question' ? MOOD_ICON[pv.mood] + ' ' : '') + pvt;
+    const other = [...msgs].reverse().find(m => m.from !== CODE);
+    byRoom[room] = {
+      partnerCode,
+      partnerName: contacts[partnerCode] || (other && other.fromName) || fmtId(partnerCode),
+      lastText: prev, lastTs: last.ts,
+      unread: msgs.filter(m => m.from !== CODE && (m.ts || 0) > (seen[room] || 0)).length,
+      timeStr: new Date(last.ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    };
   }
-  
-  chats.sort((a, b) => b.lastTs - a.lastTs);
-  
-  container.innerHTML = chats.map(chat => `
-    <div class="chat-item" onclick="openChat('${chat.room}', '${chat.partnerCode}', '${chat.partnerName}')">
-      <div class="avatar">${(chat.partnerName[0] || '?').toUpperCase()}</div>
+  const chats = Object.entries(byRoom).map(([room, c]) => Object.assign({ room }, c)).sort((a, b) => b.lastTs - a.lastTs);
+  container.innerHTML = chats.map(c => `
+    <div class="chat-item" data-room="${escapeHtml(c.room)}" data-code="${escapeHtml(c.partnerCode)}" data-name="${escapeHtml(c.partnerName)}">
+      <div class="avatar">${escapeHtml((c.partnerName[0] || '?').toUpperCase())}</div>
       <div class="chat-info">
-        <div class="chat-name">${escapeHtml(chat.partnerName)}</div>
-        <div class="chat-preview">${chat.lastTs === Date.now() ? '🟢 Online' : escapeHtml(chat.lastText)}</div>
+        <div class="chat-name">${escapeHtml(c.partnerName)}${(metaAll[c.partnerCode] || {}).ver ? ' <span class="ver-tick" title="Verifiziert">✔</span>' : ''}</div>
+        <div class="chat-preview">${((metaAll[c.partnerCode] || {}).vp && ['ask-in', 'judge'].includes(metaAll[c.partnerCode].vp.st)) ? '<span class="chat-tag ver">🔏 Frage wartet</span> ' : ''}${(metaAll[c.partnerCode] || {}).paused ? '<span class="chat-tag">⏸ pausiert</span> ' : (metaAll[c.partnerCode] || {}).req ? '<span class="chat-tag req">📨 Anfrage</span> ' : ''}${escapeHtml(c.lastText)}</div>
       </div>
-      <div class="chat-meta">
-        <div class="chat-time">${chat.timeStr}</div>
-        ${chat.unread > 0 ? `<div class="unread-badge">${chat.unread}</div>` : ''}
-      </div>
-    </div>
-  `).join('') || '<p class="text-center" style="padding:2rem;color:var(--muted2);">Noch keine Chats</p>';
+      <div class="chat-meta"><div class="chat-time">${c.timeStr}</div>${c.unread ? `<div class="unread-badge">${c.unread}</div>` : ''}</div>
+      <button class="chat-del" data-del="${escapeHtml(c.room)}" aria-label="Kontakt beenden" title="Kontakt beenden">🗑</button>
+    </div>`).join('') || `<p class="text-center" style="padding:2rem;color:var(--muted2);">Noch keine Chats.<br>Tippe auf + und gib eine ID ein.<br><br>Deine ID: <b>${fmtId(CODE)}</b></p>`;
 }
+document.addEventListener('click', (e) => {
+  const re = e.target.closest && e.target.closest('[data-reopen]');
+  if (re) { reopenContact(re.dataset.reopen, re.dataset.name).catch(() => {}); return; }
+  const fo = e.target.closest && e.target.closest('[data-forget]');
+  if (fo) {
+    if (confirm('Aus der Liste entfernen? Der Kontakt bleibt für dich beendet – du kannst ihn nur über seine ID wieder hinzufügen.')) { setClosedByMe(fo.dataset.forget, false); renderClosedList(); }
+  }
+});
+// Kontakt beenden: Verlauf hier löschen; das Gegenüber sieht einen freundlichen Hinweis und kann nicht mehr schreiben.
+// Wieder öffnen: einfach selbst eine Nachricht schreiben.
+async function deleteChat(room, name, decline) {
+  const partner = room.split('-').find(c => c !== CODE);
+  const paused = !!metaOf(partner).paused; // Gegenüber hat selbst beendet → nur aufräumen
+  const label = name || 'diesem Kontakt';
+  const q = paused
+    ? `Chat mit ${label} löschen? Der Verlauf wird auf diesem Gerät entfernt.`
+    : decline
+      ? `Anfrage von ${label} ablehnen? ${label} sieht, dass du den Kontakt nicht weiterführen möchtest, und kann dir nicht mehr schreiben.`
+      : `Kontakt mit ${label} beenden? Dein Verlauf wird hier gelöscht. ${label} sieht freundlich, dass du nicht weiterschreiben möchtest, und kann dir nicht mehr schreiben. Du findest den Kontakt unten unter „Beendete Kontakte“ und kannst jederzeit selbst wieder schreiben – dann ist der Chat wieder offen.`;
+  if (!confirm(q)) return false;
+  if (!paused) {
+    try {
+      const r = await tfetch(`${API}/messenger/close`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: CODE, token: TOKEN, partner })
+      }, 15000);
+      if (!r.ok) throw new Error('close ' + r.status);
+      setClosedByMe(partner, true, name);
+    } catch (e) {
+      alert('Kontakt konnte nicht beendet werden – keine Verbindung zum Server. Bitte später erneut versuchen.');
+      return false;
+    }
+  }
+  lsDel(CHAT_PREFIX + room);
+  imgDeleteRoom(room);
+  const c = getContacts(); delete c[partner]; lsSet('sm_chat_contacts', JSON.stringify(c));
+  delMeta(partner);
+  const sn = getSeen(); delete sn[room]; lsSet('sm_chat_seen', JSON.stringify(sn));
+  renderChatList();
+  return true;
+}
+async function declineRequest() {
+  if (!CURRENT_ROOM) return;
+  if (await deleteChat(CURRENT_ROOM, PARTNER_NAME, true)) goBackToList();
+}
+// Hinweisleiste im Chat + Eingabe sperren, wenn pausiert / Limit erreicht
+function applyChatState(extra) {
+  const note = document.getElementById('chatNote'), input = document.getElementById('msgInput');
+  const send = document.querySelector('button[onclick="sendMessage()"]'), cam = document.getElementById('imgBtn');
+  if (!note || !input || !PARTNER_CODE) return;
+  const m = metaOf(PARTNER_CODE), nm = escapeHtml(PARTNER_NAME || fmtId(PARTNER_CODE));
+  let html = '', cls = 'hidden', lock = false, ph = 'Nachricht...';
+  if (m.paused) {
+    html = `🕊️ ${nm} möchte den Kontakt gerade nicht weiterführen. Der Chat ist pausiert – du kannst den Verlauf weiterhin lesen.`;
+    cls = 'chat-note paused'; lock = true; ph = 'Chat pausiert';
+  } else if (m.req) {
+    html = `📨 Neue Anfrage von ${nm}. Wenn du antwortest, nimmst du sie an. <button class="note-btn" onclick="declineRequest()">Ablehnen</button>`;
+    cls = 'chat-note request';
+  } else if (!m.heard && (m.out || 0) >= FIRST_LIMIT) {
+    html = `⏳ Du hast ${FIRST_LIMIT} Nachrichten gesendet. Weitere gehen, sobald ${nm} antwortet.`;
+    cls = 'chat-note wait'; lock = true; ph = 'Warte auf Antwort…';
+  } else if (!m.heard && (m.out || 0) > 0) {
+    html = `Nachricht ${m.out} von ${FIRST_LIMIT} – bis ${nm} antwortet, kannst du ${FIRST_LIMIT} Nachrichten schreiben.`;
+    cls = 'chat-note wait';
+  } else if (getClosedByMe()[PARTNER_CODE]) {
+    html = 'Du hattest diesen Kontakt beendet. Sobald du schreibst, ist der Chat wieder offen.';
+    cls = 'chat-note wait';
+  }
+  if (extra) { html = escapeHtml(extra); cls = 'chat-note wait'; }
+  note.innerHTML = html; note.className = cls;
+  input.disabled = lock; input.placeholder = ph;
+  if (send) send.disabled = lock;
+  if (cam) cam.disabled = lock;
+  refreshImageState();
+}
+document.addEventListener('click', (e) => {
+  const del = e.target.closest && e.target.closest('.chat-del');
+  if (del) {
+    e.stopPropagation();
+    const it = del.closest('.chat-item');
+    deleteChat(del.dataset.del, it && it.dataset.name).catch(() => {});
+    return;
+  }
+  const it = e.target.closest && e.target.closest('.chat-item');
+  if (it && it.dataset.room) openChat(it.dataset.room, it.dataset.code, it.dataset.name);
+});
 
 // ── OPEN CHAT & P2P CONNECTION ────────────────────────────────────────────
 async function openChat(room, partnerCode, partnerName) {
+  CHAT_OPENED_AT = Date.now();
   CURRENT_ROOM = room;
   PARTNER_CODE = partnerCode;
   PARTNER_NAME = partnerName;
+  markSeen(room);
 
   document.getElementById('chatListScreen').style.display = 'none';
   document.getElementById('chatDetailScreen').style.display = 'flex';
+  fitChatToViewport();
 
   document.getElementById('headerName').textContent = partnerName;
-  updateP2PUI(false, 'Verbinde...');
+  VC_OPEN = false;
+  { const hh = metaOf(partnerCode).h; document.getElementById('headerCode').textContent = (hh ? '@' + hh + ' · ' : '') + fmtId(partnerCode); }
+  document.getElementById('headerAvatar').textContent = (partnerName[0] || '?').toUpperCase();
+  updateP2PUI(canSendImage(), canSendImage() ? 'P2P Aktiv' : 'Server-Modus');
+  applyChatState();
+  updateHeaderVer();
+  renderVerCard();
 
   await renderMessages();
 
@@ -734,47 +1319,30 @@ async function attemptP2PConnection(partnerCode) {
   // Safety Checks
   if (!webrtc) {
     console.warn('[Chat] WebRTC nicht initialisiert');
-    updateP2PUI(false, 'Fehler: WebRTC missing');
+    updateP2PUI(false, 'Server-Modus');
     return;
   }
 
   if (!CODE || !PARTNER_CODE) {
     console.error('[Chat] Missing CODE or PARTNER_CODE:', { CODE, PARTNER_CODE });
-    updateP2PUI(false, 'Fehler: Invalid State');
+    updateP2PUI(false, 'Server-Modus');
     return;
   }
 
   try {
     console.log('[Chat] Starte P2P-Verbindung zu:', partnerCode);
 
-    // 1. Bereit-Invite an Partner senden (Signal über Server)
-    await sendReadinessInvite(PARTNER_CODE);
-    console.log('[Chat] Invite gesendet');
+    // Eigene Anmeldung sicherstellen (kein Warten – Versuche laufen unten wiederholt)
+    webrtc.ensureRegistered();
 
-    // 2. Auf eigene Peer-Bereitschaft warten (falls noch nicht registriert)
-    await webrtc.connect(PARTNER_CODE, (peerId) => {
-      console.log('[Chat] Eigener Peer bereit:', peerId);
-    });
+    // 3. Verbindung zum Partner aufbauen – mit Wiederholung (Partner meldet sich evtl. erst später an).
+    // Die Seite mit dem kleineren Code startet sofort, die andere erst nach ~8 s als Nachzügler,
+    // damit nicht beide gleichzeitig verbinden.
+    startP2PAttempts(partnerCode);
 
-    // 3. Verbindung zum Partner initiieren
-    // Partner muss ebenfalls registriert sein (Login → register())
-    // FIX: Nur die Seite mit dem "kleineren" Code initiiert aktiv.
-    // Öffnen beide Seiten den Chat gleichzeitig, entstehen sonst zwei
-    // parallele Connections und this.conn wird inkonsistent überschrieben —
-    // das war der Grund für "Nachricht kommt erst beim Verlassen des Chats".
-    if (CODE < PARTNER_CODE) {
-      webrtc.initiateConnection(PARTNER_CODE);
-      console.log('[Chat] Verbindung initiert (wir sind Initiator)');
-    } else {
-      console.log('[Chat] Warte auf eingehende Verbindung von', PARTNER_CODE);
-    }
-
-    // Timeout: Nach 3 Sek kein P2P → Server-Modus anzeigen
+    // Nach 3 s ohne P2P ruhig "Server-Modus" anzeigen
     setTimeout(() => {
-      if (!isP2PConnected) {
-        console.log('[Chat] P2P Timeout, bleibe im Server-Modus');
-        updateP2PUI(false, 'Server-Modus (Timeout)');
-      }
+      if (!canSendImage()) updateP2PUI(false, 'Server-Modus');
     }, 3000);
 
   } catch (err) {
@@ -788,6 +1356,27 @@ async function attemptP2PConnection(partnerCode) {
     }
   }
         }
+
+let P2P_ATTEMPT_TIMER = null;
+function startP2PAttempts(partnerCode) {
+  if (P2P_ATTEMPT_TIMER) clearInterval(P2P_ATTEMPT_TIMER);
+  let n = 0;
+  const step = () => {
+    // Chat zu oder anderer Chat offen → aufhören
+    if (!webrtc || PARTNER_CODE !== partnerCode) { clearInterval(P2P_ATTEMPT_TIMER); P2P_ATTEMPT_TIMER = null; return; }
+    if (webrtc.isConnectedTo(partnerCode)) { clearInterval(P2P_ATTEMPT_TIMER); P2P_ATTEMPT_TIMER = null; return; }
+    webrtc.ensureRegistered();
+    if (webrtc.isPeerReady() && (CODE < partnerCode || n >= 2)) {
+      try { webrtc.initiateConnection(partnerCode); } catch (e) { console.warn('[Chat] connect:', e); }
+    }
+    if (++n >= 12) { clearInterval(P2P_ATTEMPT_TIMER); P2P_ATTEMPT_TIMER = null; }
+  };
+  P2P_ATTEMPT_TIMER = setInterval(step, 4000);
+  step();
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && webrtc) { webrtc.ensureRegistered(); if (PARTNER_CODE && !webrtc.isConnectedTo(PARTNER_CODE)) startP2PAttempts(PARTNER_CODE); }
+});
 
 async function sendReadinessInvite(partnerCode) {
   try {
@@ -812,6 +1401,8 @@ async function sendReadinessInvite(partnerCode) {
 }
 
 function goBackToList() {
+  if (P2P_ATTEMPT_TIMER) { clearInterval(P2P_ATTEMPT_TIMER); P2P_ATTEMPT_TIMER = null; }
+  markSeen(CURRENT_ROOM);
   CURRENT_ROOM = null;
   PARTNER_CODE = null;
   PARTNER_NAME = null;
@@ -848,13 +1439,18 @@ async function renderMessages(appendOnly = false) {
           ? '<span class="msg-status delivered" title="Zugestellt">✓✓</span>'
           : '<span class="msg-status sent" title="Gesendet">✓</span>')
       : '';
-    return `
-      <div class="message ${isMine ? 'mine' : 'other'}">
-        <div class="msg-author">${escapeHtml(m.fromName || m.from)}</div>
-        ${escapeHtml(m.text)}
-        <div class="msg-time">${new Date(m.ts).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'})}${statusTick}</div>
-      </div>
-    `;
+    const time = new Date(m.ts).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+    const body = m.kind === 'image'
+      ? `<img class="chat-img ${isMine ? '' : 'blur'}" data-iid="${escapeHtml(m.iid)}" alt="Bild">${isMine ? '' : '<div class="img-tap">Tippen zum Anzeigen</div>'}`
+      : escapeHtml(m.text);
+    if (m.kind !== 'image' && comicOn()) {
+      const pm = parseMood(m.text);
+      const BADGES = { question: '?', shout: '!', love: '♥', whisper: '…', scare: '!?', anger: '#@!', laugh: 'HA', sad: '💧', tired: 'Zzz', idea: '💡', cool: '😎' };
+      const badge = BADGES[pm.mood] || '';
+      const tilt = ((m.ts % 5) - 2) * 0.35;
+      return `<div class="message ${isMine ? 'mine' : 'other'} cm cm-${pm.mood}" style="--tilt:${tilt}deg">${badge ? `<span class="cm-badge${/^[?!♥…]$/.test(badge) || /\p{Extended_Pictographic}/u.test(badge) ? '' : ' w'}">${badge}</span>` : ''}<span class="cm-txt">${escapeHtml(pm.text)}</span><div class="msg-time">${time}${statusTick}</div></div>`;
+    }
+    return `<div class="message ${isMine ? 'mine' : 'other'}${m.kind === 'image' ? ' has-img' : ''}">${body}<div class="msg-time">${time}${statusTick}</div></div>`;
   };
 
   // FIX: Bei jeder eingehenden Nachricht wurde vorher die komplette Liste
@@ -870,6 +1466,282 @@ async function renderMessages(appendOnly = false) {
 
   RENDERED_MSG_COUNT = msgs.length;
   container.scrollTop = container.scrollHeight;
+  hydrateImages(container).then(() => { container.scrollTop = container.scrollHeight; });
+}
+
+
+// ── COMIC-STIL: Sprechblasen je Stimmung ───────────────────────────────────
+// Die Stimmung reist als Emoji am Nachrichtenanfang ("💥 Echt jetzt!") – kein Server-Umbau,
+// alte Versionen zeigen einfach das Emoji. Frage wird automatisch bei "?" am Ende erkannt.
+const COMIC_KEY = 'sm_chat_comic';        // '1' an, '0' aus, leer = noch nicht entschieden
+const MOODS = { '🗯': 'thought', '💥': 'wow', '📣': 'shout', '🤫': 'whisper', '💗': 'love',
+  '😱': 'scare', '😡': 'anger', '😂': 'laugh', '😢': 'sad', '😴': 'tired', '💡': 'idea', '😎': 'cool', '📜': 'narrator' };
+const MOOD_ICON = { speech: '💬', question: '❓', thought: '🗯️', wow: '💥', shout: '📣', whisper: '🤫', love: '💗',
+  scare: '😱', anger: '😡', laugh: '😂', sad: '😢', tired: '😴', idea: '💡', cool: '😎', narrator: '📜' };
+const MOOD_RE = new RegExp('^(' + Object.keys(MOODS).map(k => k === '🗯' ? '🗯\\uFE0F?' : k).join('|') + ')\\s+([\\s\\S]*)$', 'u');
+let CUR_MOOD = '';
+function comicOn() { return lsGet(COMIC_KEY) === '1'; }
+function parseMood(text) {
+  const t = String(text || '');
+  const m = t.match(MOOD_RE);
+  if (m) return { mood: MOODS[m[1].replace('️', '')], text: m[2] };
+  if (/\?[!?\s]*$/.test(t.trim())) return { mood: 'question', text: t };
+  return { mood: 'speech', text: t };
+}
+function applyComic() {
+  const c = document.getElementById('messages');
+  if (c) c.classList.toggle('comic', comicOn());
+}
+function setComic(on) {
+  lsSet(COMIC_KEY, on ? '1' : '0');
+  applyComic(); updateComicHint();
+  if (CURRENT_ROOM) renderMessages();
+}
+function updateComicHint() {
+  const el = document.getElementById('comicHint');
+  if (!el) return;
+  const bb = document.getElementById('backupBar');
+  if (lsGet(COMIC_KEY) !== null || (bb && !bb.classList.contains('hidden'))) { el.className = 'backup-bar hidden'; el.innerHTML = ''; return; }
+  el.className = 'backup-bar comic-hint';
+  el.innerHTML = `<span>🗯️ <b>Neu:</b> Comic-Stil – Sprechblasen mit Gefühl! Du kannst es jederzeit im Profil ändern.</span>
+    <span class="bk-btns"><button class="note-btn" onclick="setComic(true)">Ausprobieren</button><button class="note-btn ghost" onclick="setComic(false)">Nein danke</button></span>`;
+}
+function toggleMoodMore() {
+  const t = document.getElementById('moodTray'); t.classList.toggle('more');
+  const b = document.getElementById('moodMore'); const on = t.classList.contains('more');
+  b.innerHTML = (on ? '◂' : '▸') + '<span>' + (on ? 'weniger' : 'mehr') + '</span>';
+}
+function toggleMoodTray() { document.getElementById('moodTray').classList.toggle('hidden'); }
+function pickMood(m) {
+  CUR_MOOD = m;
+  document.getElementById('moodBtn').textContent = m || '💬';
+  document.getElementById('moodBtn').classList.toggle('on', !!m);
+  document.querySelectorAll('#moodTray button').forEach(b => b.classList.toggle('sel', b.dataset.mood === m));
+  document.getElementById('moodTray').classList.add('hidden');
+  document.getElementById('msgInput').focus();
+}
+
+
+// ── TÖNE: alles live per WebAudio erzeugt (keine Audiodateien) ─────────────
+// Beim Senden (leiser Bestätigungston) und beim Empfangen (voll). Nur bei sichtbarer Seite.
+const SND_KEY = 'sm_chat_snd', SNDV_KEY = 'sm_chat_snd_vol';
+let AC = null;
+function sndOn() { return lsGet(SND_KEY) === '1'; }
+function sndVol() { const v = lsGet(SNDV_KEY); return v === '1' || v === '3' ? v : '2'; }
+function setSnd(on) { lsSet(SND_KEY, on ? '1' : '0'); if (on) { sndCtx(); testSnd(); } }
+function setSndVol(v) { lsSet(SNDV_KEY, v); testSnd(); }
+function testSnd() { playMood('wow', 'in', true); }
+function sndCtx() {
+  try {
+    if (!AC) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; AC = new C(); }
+    if (AC.state === 'suspended') AC.resume().catch(() => {});
+    return AC;
+  } catch (e) { return null; }
+}
+// Browser erlaubt Ton erst nach einer Berührung → beim ersten Tippen freischalten
+document.addEventListener('pointerdown', () => { if (sndOn()) sndCtx(); }, { passive: true });
+function sndTone(c, out, t, o) {
+  const osc = c.createOscillator(), g = c.createGain(), d = o.d || 0.15;
+  osc.type = o.type || 'sine';
+  osc.frequency.setValueAtTime(o.f, t);
+  if (o.f2) osc.frequency.exponentialRampToValueAtTime(o.f2, t + d);
+  if (o.vib) { const l = c.createOscillator(), lg = c.createGain(); l.frequency.value = o.vib; lg.gain.value = o.f * 0.06; l.connect(lg); lg.connect(osc.frequency); l.start(t); l.stop(t + d + 0.05); }
+  let node = osc;
+  if (o.lp) { const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; osc.connect(f); node = f; }
+  node.connect(g); g.connect(out);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(o.g || 0.2, t + (o.at || 0.008));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  osc.start(t); osc.stop(t + d + 0.05);
+}
+function sndNoise(c, out, t, o) {
+  const len = Math.max(1, Math.floor(c.sampleRate * o.d)), buf = c.createBuffer(1, len, c.sampleRate), data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  const src = c.createBufferSource(); src.buffer = buf;
+  const f = c.createBiquadFilter(); f.type = o.type || 'bandpass'; f.frequency.value = o.f || 2000;
+  const g = c.createGain();
+  src.connect(f); f.connect(g); g.connect(out);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(o.g || 0.1, t + (o.at || 0.01));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + o.d);
+  src.start(t); src.stop(t + o.d + 0.02);
+}
+const SOUNDS = {
+  speech:  (c, o, t) => sndTone(c, o, t, { f: 560, f2: 300, d: 0.09, g: 0.28 }),
+  question:(c, o, t) => { sndTone(c, o, t, { f: 520, d: 0.13, type: 'triangle', g: 0.25 }); sndTone(c, o, t + 0.13, { f: 700, d: 0.2, type: 'triangle', g: 0.25 }); },
+  thought: (c, o, t) => sndTone(c, o, t, { f: 420, d: 0.5, g: 0.2, vib: 7, at: 0.12 }),
+  wow:     (c, o, t) => { sndNoise(c, o, t, { d: 0.2, f: 1400, type: 'lowpass', g: 0.35 }); sndTone(c, o, t, { f: 120, f2: 45, d: 0.4, g: 0.5 }); sndTone(c, o, t, { f: 900, f2: 220, d: 0.16, type: 'square', g: 0.12, lp: 2500 }); },
+  shout:   (c, o, t) => { sndTone(c, o, t, { f: 300, d: 0.16, type: 'sawtooth', g: 0.2, lp: 1600 }); sndTone(c, o, t + 0.19, { f: 340, d: 0.24, type: 'sawtooth', g: 0.2, lp: 1600 }); },
+  whisper: (c, o, t) => sndNoise(c, o, t, { d: 0.4, f: 3200, g: 0.07, at: 0.15 }),
+  love:    (c, o, t) => [784, 988, 1175].forEach((f, i) => sndTone(c, o, t + i * 0.1, { f, d: 0.3, g: 0.2 })),
+  scare:   (c, o, t) => sndTone(c, o, t, { f: 400, f2: 1500, d: 0.32, type: 'sawtooth', g: 0.14, lp: 2600, vib: 14 }),
+  anger:   (c, o, t) => { sndTone(c, o, t, { f: 95, f2: 70, d: 0.42, type: 'sawtooth', g: 0.3, lp: 420, vib: 22 }); sndTone(c, o, t, { f: 101, f2: 74, d: 0.42, type: 'square', g: 0.12, lp: 380 }); },
+  laugh:   (c, o, t) => [600, 520, 600, 520].forEach((f, i) => sndTone(c, o, t + i * 0.11, { f, d: 0.08, type: 'triangle', g: 0.25 })),
+  sad:     (c, o, t) => { sndTone(c, o, t, { f: 440, f2: 330, d: 0.28, g: 0.2, vib: 6 }); sndTone(c, o, t + 0.28, { f: 330, f2: 230, d: 0.4, g: 0.2, vib: 6 }); },
+  tired:   (c, o, t) => sndTone(c, o, t, { f: 320, f2: 170, d: 0.7, g: 0.16, at: 0.2 }),
+  idea:    (c, o, t) => { sndTone(c, o, t, { f: 1319, d: 0.5, g: 0.22 }); sndTone(c, o, t + 0.09, { f: 1760, d: 0.45, g: 0.14 }); },
+  cool:    (c, o, t) => { sndTone(c, o, t, { f: 200, f2: 340, d: 0.28, type: 'sawtooth', g: 0.2, lp: 700 }); sndNoise(c, o, t, { d: 0.03, f: 5000, type: 'highpass', g: 0.15 }); },
+  verify:  (c, o, t) => [523, 659, 784, 1047].forEach((f, i) => sndTone(c, o, t + i * 0.09, { f, d: 0.35, g: 0.2 })),
+  narrator:(c, o, t) => [0, 0.06, 0.12].forEach(d => sndNoise(c, o, t + d, { d: 0.025, f: 4500, type: 'highpass', g: 0.22 }))
+};
+function playMood(mood, dir, force) {
+  if (!force && (!sndOn() || document.hidden)) return;
+  const c = sndCtx();
+  if (!c) return;
+  const fn = SOUNDS[mood] || SOUNDS.speech;
+  const master = c.createGain();
+  master.gain.value = ({ '1': 0.45, '2': 1, '3': 1.8 }[sndVol()]) * (dir === 'out' ? 0.5 : 1);
+  master.connect(c.destination);
+  try { fn(c, master, c.currentTime + 0.02); } catch (e) {}
+}
+function playIncoming(text) { playMood(parseMood(text).mood, 'in'); }
+
+
+// ── VERIFIZIERUNG (grüner Haken) – immer zwischen genau 2 Chatpartnern ─────
+// Ablauf: A stellt eine Frage → B antwortet → A bestätigt ("Stimmt") → beide bekommen ✔.
+// Die Schritte laufen als unsichtbare Steuer-Nachrichten (🔏…) über das normale Postfach.
+const VCTRL = '🔏';
+const VCTRL_RE = /^🔏(Q|A|OK|NO|X|UN)\|([a-z0-9]{4,12})(?:\|([\s\S]*))?$/u;
+let VC_OPEN = false;
+function vpOf(code) { return metaOf(code).vp || null; }
+function verRid() { return Math.random().toString(36).slice(2, 8).padEnd(6, 'x'); }
+async function sendCtrl(partner, text) {
+  try {
+    const res = await tfetch(`${API}/message`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: partner, sender_code: CODE, sender_name: PROFILE?.name || CODE, message: text, spot_type: 'messenger_chat', token: TOKEN })
+    }, 15000);
+    return res.ok;
+  } catch (e) { return false; }
+}
+function verifyServer(partner, on) {
+  tfetch(`${API}/messenger/verify`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: CODE, token: TOKEN, partner, on })
+  }, 15000).catch(() => {});
+}
+// Alle lokal verifizierten Kontakte beim Server nachmelden (idempotent) – heilt verlorene Einzelmeldungen
+async function syncVerified(force) {
+  try {
+    const last = Number(lsGet('sm_chat_vsync') || 0);
+    if (!force && Date.now() - last < 6 * 3600 * 1000) return;
+    const m = getMeta(), partners = Object.keys(m).filter(k => m[k] && m[k].ver);
+    if (!partners.length) return;
+    const r = await tfetch(`${API}/messenger/verify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: CODE, token: TOKEN, partners })
+    }, 15000);
+    if (r.ok) lsSet('sm_chat_vsync', String(Date.now()));
+  } catch (e) {}
+}
+function verifiedFx() { playMood('verify', 'in'); }
+function handleControl(from, text) {
+  const m = String(text).match(VCTRL_RE);
+  if (!m) return false;
+  const t = m[1], id = m[2], body = (m[3] || '').slice(0, 160);
+  const mt = metaOf(from);
+  if (!getContacts()[from] || mt.req) return true; // nur von bekannten Kontakten
+  const vp = mt.vp || null;
+  if (t === 'Q') {
+    if (!mt.ver) { setMeta(from, { vp: { id, role: 'answerer', q: body, st: 'ask-in' }, vnote: '' }); playMood('question', 'in'); }
+  } else if (t === 'A') {
+    if (vp && vp.role === 'asker' && vp.id === id && vp.st === 'asked') { setMeta(from, { vp: Object.assign({}, vp, { st: 'judge', a: body }) }); playMood('question', 'in'); }
+  } else if (t === 'OK') {
+    if (vp && vp.role === 'answerer' && vp.id === id && vp.st === 'answered') { setMeta(from, { ver: true, vp: null, vnote: '' }); verifyServer(from, true); verifiedFx(); }
+  } else if (t === 'NO') {
+    if (vp && vp.id === id) setMeta(from, { vp: null, vnote: 'no' });
+  } else if (t === 'X') {
+    if (vp && vp.id === id) setMeta(from, { vp: null, vnote: 'x' });
+  } else if (t === 'UN') {
+    if (mt.ver) { setMeta(from, { ver: false, vp: null, vnote: 'un' }); verifyServer(from, false); }
+  }
+  refreshVerUI(from);
+  return true;
+}
+function refreshVerUI(from) {
+  if (CURRENT_ROOM && from === PARTNER_CODE) { updateHeaderVer(); renderVerCard(); }
+  renderChatList();
+}
+function updateHeaderVer() {
+  const b = document.getElementById('verBtn');
+  const ver = !!(PARTNER_CODE && metaOf(PARTNER_CODE).ver);
+  if (b) { b.classList.toggle('on', ver); b.title = ver ? 'Verifiziert' : 'Verifizieren'; }
+  const n = document.getElementById('headerName');
+  if (n && PARTNER_NAME) n.innerHTML = escapeHtml(PARTNER_NAME) + (ver ? ' <span class="ver-tick">✔</span>' : '');
+}
+function toggleVerCard() {
+  if (!PARTNER_CODE) return;
+  const vp = vpOf(PARTNER_CODE);
+  if (vp) { VC_OPEN = true; renderVerCard(); return; } // laufende Verifizierung bleibt sichtbar
+  VC_OPEN = !VC_OPEN;
+  setMeta(PARTNER_CODE, { vnote: '' });
+  renderVerCard();
+}
+function renderVerCard() {
+  const el = document.getElementById('verCard');
+  if (!el) return;
+  if (!PARTNER_CODE) { el.className = 'ver-card hidden'; return; }
+  const m = metaOf(PARTNER_CODE), vp = m.vp, nm = escapeHtml(PARTNER_NAME || fmtId(PARTNER_CODE));
+  let html = '';
+  if (vp) {
+    if (vp.st === 'asked') html = `<b>🔏 Verifizierung läuft</b><p>Deine Frage an ${nm}:<br><i>„${escapeHtml(vp.q)}“</i></p><p class="vc-wait">Warte auf die Antwort …</p><div class="vc-btns"><button class="vc-ghost" onclick="verCancel()">Abbrechen</button></div>`;
+    else if (vp.st === 'ask-in') html = `<b>🔏 ${nm} möchte dich verifizieren</b><p>Die Frage lautet:<br><i>„${escapeHtml(vp.q)}“</i></p><input id="vcInput" maxlength="120" placeholder="Deine Antwort" autocomplete="off"><div class="vc-btns"><button onclick="verAnswer()">Antworten</button><button class="vc-ghost" onclick="verCancel()">Ablehnen</button></div>`;
+    else if (vp.st === 'answered') html = `<b>🔏 Antwort gesendet</b><p>Du hast geantwortet: <i>„${escapeHtml(vp.a || '')}“</i></p><p class="vc-wait">Warte, bis ${nm} bestätigt …</p><div class="vc-btns"><button class="vc-ghost" onclick="verCancel()">Abbrechen</button></div>`;
+    else if (vp.st === 'judge') html = `<b>🔏 ${nm} antwortet</b><p>Deine Frage: <i>„${escapeHtml(vp.q)}“</i><br>Antwort: <i>„${escapeHtml(vp.a || '')}“</i></p><p>Ist das die richtige Antwort?</p><div class="vc-btns"><button onclick="verJudge(true)">✔ Stimmt</button><button class="vc-no" onclick="verJudge(false)">✖ Stimmt nicht</button><button class="vc-ghost" onclick="verCancel()">Abbrechen</button></div>`;
+  } else if (m.ver) {
+    if (!VC_OPEN) { el.className = 'ver-card hidden'; return; }
+    html = `<b>✔ Verifiziert</b><p>Du und ${nm} habt euch gegenseitig bestätigt. Der grüne Haken bleibt am Namen.</p><div class="vc-btns"><button class="vc-ghost" onclick="verUnverify()">Verifizierung aufheben</button><button class="vc-ghost" onclick="toggleVerCard()">Schließen</button></div>`;
+  } else {
+    const note = { no: 'Die Antwort wurde nicht bestätigt – keine Verifizierung.', x: 'Die Verifizierung wurde abgebrochen.', un: 'Die Verifizierung wurde aufgehoben.' }[m.vnote || ''];
+    if (!VC_OPEN && !note) { el.className = 'ver-card hidden'; return; }
+    const can = m.heard && m.talk && !m.req && !m.paused;
+    html = `${note ? `<p class="vc-note">${note}</p>` : ''}` + (VC_OPEN ? (can
+      ? `<b>🔏 ${nm} verifizieren</b><p>Stelle eine Frage, die nur dein echter Kontakt beantworten kann (z. B. „Wo haben wir uns zuerst gesehen?“). Bestätigst du die Antwort, bekommt ihr beide einen grünen Haken.</p><input id="vcInput" maxlength="120" placeholder="Deine Frage" autocomplete="off"><div class="vc-btns"><button onclick="verSend()">Frage senden</button><button class="vc-ghost" onclick="toggleVerCard()">Abbrechen</button></div>`
+      : `<b>🔏 Verifizieren</b><p>Das geht, sobald ihr euch gegenseitig geschrieben habt.</p><div class="vc-btns"><button class="vc-ghost" onclick="toggleVerCard()">Schließen</button></div>`) : `<div class="vc-btns"><button class="vc-ghost" onclick="verNoteClose()">OK</button></div>`);
+  }
+  el.className = 'ver-card';
+  el.innerHTML = html;
+}
+function verNoteClose() { setMeta(PARTNER_CODE, { vnote: '' }); renderVerCard(); }
+async function verSend() {
+  const i = document.getElementById('vcInput'), q = (i && i.value || '').trim();
+  if (q.length < 3) { if (i) i.focus(); return; }
+  const id = verRid();
+  setMeta(PARTNER_CODE, { vp: { id, role: 'asker', q, st: 'asked' }, vnote: '' });
+  VC_OPEN = true; renderVerCard();
+  const ok = await sendCtrl(PARTNER_CODE, `${VCTRL}Q|${id}|${q}`);
+  if (!ok) { setMeta(PARTNER_CODE, { vp: null, vnote: '' }); VC_OPEN = true; renderVerCard(); const el = document.getElementById('verCard'); el.insertAdjacentHTML('afterbegin', '<p class="vc-note">Nicht gesendet – bitte später erneut versuchen.</p>'); }
+}
+async function verAnswer() {
+  const i = document.getElementById('vcInput'), a = (i && i.value || '').trim(), vp = vpOf(PARTNER_CODE);
+  if (!vp || !a) { if (i) i.focus(); return; }
+  const ok = await sendCtrl(PARTNER_CODE, `${VCTRL}A|${vp.id}|${a}`);
+  if (!ok) { const el = document.getElementById('verCard'); el.insertAdjacentHTML('afterbegin', '<p class="vc-note">Nicht gesendet – bitte später erneut versuchen.</p>'); return; }
+  setMeta(PARTNER_CODE, { vp: Object.assign({}, vp, { st: 'answered', a }) });
+  renderVerCard();
+}
+async function verJudge(yes) {
+  const vp = vpOf(PARTNER_CODE);
+  if (!vp) return;
+  const ok = await sendCtrl(PARTNER_CODE, `${VCTRL}${yes ? 'OK' : 'NO'}|${vp.id}`);
+  if (!ok) { const el = document.getElementById('verCard'); el.insertAdjacentHTML('afterbegin', '<p class="vc-note">Nicht gesendet – bitte später erneut versuchen.</p>'); return; }
+  if (yes) { setMeta(PARTNER_CODE, { ver: true, vp: null, vnote: '' }); verifyServer(PARTNER_CODE, true); verifiedFx(); VC_OPEN = true; }
+  else { setMeta(PARTNER_CODE, { vp: null, vnote: '' }); VC_OPEN = false; }
+  updateHeaderVer(); renderVerCard(); renderChatList();
+}
+async function verCancel() {
+  const vp = vpOf(PARTNER_CODE);
+  if (!vp) return;
+  sendCtrl(PARTNER_CODE, `${VCTRL}X|${vp.id}`);
+  setMeta(PARTNER_CODE, { vp: null, vnote: '' });
+  VC_OPEN = false; renderVerCard(); renderChatList();
+}
+async function verUnverify() {
+  if (!confirm('Verifizierung mit ' + (PARTNER_NAME || 'diesem Kontakt') + ' aufheben? Der Haken verschwindet bei euch beiden.')) return;
+  sendCtrl(PARTNER_CODE, `${VCTRL}UN|${verRid()}`);
+  setMeta(PARTNER_CODE, { ver: false, vp: null, vnote: '' });
+  verifyServer(PARTNER_CODE, false);
+  VC_OPEN = false; updateHeaderVer(); renderVerCard(); renderChatList();
 }
 
 // ── SEND MESSAGE (P2P Priority + Fallback) ────────────────────────────────
@@ -900,15 +1772,21 @@ async function sendMessage() {
   const input = document.getElementById('msgInput');
   // FIX: Mehrfaches Enter erzeugt sonst viele Leerzeilen → riesige Bubble.
   // Maximal eine Leerzeile zwischen Absätzen bleibt erlaubt.
-  const text = input.value.trim().replace(/\n{3,}/g, '\n\n');
+  let text = input.value.trim().replace(/\n{3,}/g, '\n\n');
 
+  if (text.startsWith(VCTRL)) text = text.slice(VCTRL.length).trim();
   if (!text) return;
+  if (CUR_MOOD && !MOOD_RE.test(text)) text = CUR_MOOD + ' ' + text;
+  if (CUR_MOOD) pickMood('');
 
   if (!PARTNER_CODE) {
     console.error('[Chat] Kein Partner ausgewählt!');
     return;
   }
 
+  const st0 = metaOf(PARTNER_CODE);
+  if (st0.paused) return;
+  if (!st0.heard && (st0.out || 0) >= FIRST_LIMIT) { applyChatState(); return; }
   const myName = PROFILE?.name || CODE;
   const ts = Date.now(); // EIN Timestamp für lokale Bubble + P2P-Ack-Matching
 
@@ -920,9 +1798,12 @@ async function sendMessage() {
   await renderMessages(true);
   input.value = '';
   input.style.height = 'auto';
+  playMood(parseMood(text).mood, 'out');
 
   // Priority: P2P → Server Fallback
-  if (webrtc && typeof webrtc.isConnected === 'function' && webrtc.isConnected()) {
+  // P2P nur nach der ersten Antwort (beide kennen sich) – die erste Runde läuft über den Server (Limits)
+  const st1 = metaOf(PARTNER_CODE);
+  if (st1.heard && st1.talk && !st1.req && webrtc && typeof webrtc.isConnectedTo === 'function' && webrtc.isConnectedTo(PARTNER_CODE)) {
     try {
       const sent = webrtc.send(text, ts);
       if (sent) {
@@ -945,16 +1826,34 @@ async function sendMessage() {
         sender_code: CODE,
         sender_name: myName,
         message: text,
-        spot_type: 'caching_chat',
+        spot_type: 'messenger_chat',
         token: TOKEN
         })
     });
 
     if (!res.ok) {
       console.warn('[Chat] Nachricht nicht gesendet:', res.status, res.statusText);
+      const err = await res.json().catch(() => ({}));
+      if (err.code === 'closed' || err.code === 'limit' || err.code === 'daily') {
+        // abgelehnt → Blase wieder entfernen, Text zurück ins Eingabefeld
+        const stillThere = (await getMessages()).filter(m => !(m.from === CODE && m.ts === ts));
+        await saveMessages(stillThere);
+        if (CURRENT_ROOM) await renderMessages();
+        if (err.code === 'closed') setMeta(PARTNER_CODE, { paused: true });
+        else if (err.code === 'limit') setMeta(PARTNER_CODE, { out: FIRST_LIMIT });
+        if (err.code !== 'closed') { const i = document.getElementById('msgInput'); if (!i.value) i.value = text; }
+        applyChatState(err.code === 'daily' ? 'Heute hast du schon viele neue Kontakte angeschrieben – bitte später wieder.' : null);
+      }
     } else {
       console.log('[Chat] Via Server gesendet');
       updateP2PUI(false, 'Server-Modus');
+      {
+        const d0 = await res.clone().json().catch(() => ({}));
+        const was = metaOf(PARTNER_CODE);
+        setMeta(PARTNER_CODE, { req: false, out: d0.pending ? d0.pending.used : 0, talk: was.heard ? true : !!was.talk });
+        setClosedByMe(PARTNER_CODE, false);
+        applyChatState();
+      }
 
       // "delivered" = Push-Zustellung an den Dienst hat geklappt.
       // KEIN Lesestatus, keine Uhrzeit – nur ob die Benachrichtigung raus ist.
@@ -985,50 +1884,89 @@ function updateHeaderStatus(status, isP2P) {
 }
 
 // ── POLLING ───────────────────────────────────────────────────────────────
+let POLLING = false;
 async function initPolling() {
   if (POLL_TIMER) clearInterval(POLL_TIMER);
+  POLL_TIMER = setInterval(pollOnce, 5000); // alle 5 Sekunden
+  pollOnce();                                // und sofort beim Start
+}
+// sofort neu abholen, sobald die App wieder sichtbar ist oder Netz zurückkehrt
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollOnce(); });
+window.addEventListener('online', () => pollOnce());
+window.addEventListener('focus', () => pollOnce());
 
-  POLL_TIMER = setInterval(async () => {
-    if (!CODE) return;
+async function pollOnce() {
+    if (!CODE || POLLING) return;
+    POLLING = true;
 
     try {
       // ── 1. Nachrichten abholen (wie bisher) ──
-      const res = await fetch(`${API}/messages/${CODE}?spot_type=caching_chat&token=${encodeURIComponent(TOKEN)}`);
+      const actQ = (CURRENT_ROOM && PARTNER_CODE && !document.hidden) ? `&active=${encodeURIComponent(PARTNER_CODE)}` : '';
+      const res = await tfetch(`${API}/messages/${CODE}?spot_type=messenger_chat&token=${encodeURIComponent(TOKEN)}${actQ}`);
       if (res.ok) {
         const newMsgs = await res.json();
         if (newMsgs.length) {
           let renderedAny = false;
           let listNeedsUpdate = false;
+          let sndText = null;
 
           for (const m of newMsgs) {
             const room = [CODE, m.sender_code].sort().join('-');
 
+            // Hinweis: Gegenüber hat den Kontakt beendet → Chat pausieren (nichts speichern)
+            if (m.message === CLOSED_MARK) {
+              if (getContacts()[m.sender_code] && !getClosedByMe()[m.sender_code]) {
+                setMeta(m.sender_code, { paused: true });
+                listNeedsUpdate = true;
+                if (room === CURRENT_ROOM) applyChatState();
+              }
+              continue;
+            }
+            // Von mir beendete Kontakte: nichts annehmen
+            if (getClosedByMe()[m.sender_code]) continue;
+            // Verifizierungs-Schritte: nie als Chat-Nachricht anzeigen
+            if (String(m.message).startsWith(VCTRL)) { if (handleControl(m.sender_code, m.message)) listNeedsUpdate = true; continue; }
+            const knownBefore = !!getContacts()[m.sender_code];
+            if (!knownBefore) setMeta(m.sender_code, { req: true, heard: true });
+            else setMeta(m.sender_code, { heard: true, paused: false, out: 0 });
+
             const msgs = await loadRoomMessages(room);
 
-            const exists = msgs.some(e =>
-              e.from === m.sender_code &&
-              e.text === m.message
+            const exists = msgs.some(e => e.sid === m.id) || msgs.some(e =>
+              !e.sid && e.from === m.sender_code && e.text === m.message
             );
+            if (m.sender_name) addContact(m.sender_code, m.sender_name);
 
             if (!exists) {
               msgs.push({
                 from: m.sender_code,
                 fromName: m.sender_name,
                 text: m.message,
+                sid: m.id,
                 ts: new Date(m.created_at).getTime()
               });
               await saveRoomMessages(room, msgs);
               listNeedsUpdate = true;
+              sndText = m.message;
 
               if (room === CURRENT_ROOM) {
+                markSeen(room);
                 await renderMessages(true);
                 renderedAny = true;
+                applyChatState();
               }
             }
           }
 
-          if (renderedAny) {
-            updateP2PUI('Server-Modus (Polling)', false);
+          if (sndText !== null) playIncoming(sndText);
+
+          // Empfang bestätigen – erst dann löscht der Server die Nachrichten
+          fetch(`${API}/messages/${CODE}/ack`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: TOKEN, ids: newMsgs.map(x => x.id) })
+          }).catch(() => {});
+          if (renderedAny && !canSendImage()) {
+            updateP2PUI(false, 'Server-Modus');
           }
           if (listNeedsUpdate && !renderedAny) {
             renderChatList();
@@ -1036,54 +1974,52 @@ async function initPolling() {
         }
       }
 
-      // ── 2. NEU: Invites abholen ──
-      // Wenn jemand uns chatten will, stellen wir sicher dass unser Peer ready ist
-      const invRes = await fetch(`${API}/invites/pending/${CODE}`);
-      if (invRes.ok) {
-        const invites = await invRes.json();
-        if (invites && invites.length > 0) {
-          invites.forEach(inv => {
-            console.log('[Chat] Pending Invite von:', inv.from || inv.sender_code);
-
-            // Unser Peer sollte bereits registriert sein (Login)
-            // Nur sicherstellen, falls etwas schiefgegangen ist
-            if (webrtc && !webrtc.isPeerReady()) {
-              console.log('[Chat] Peer nicht ready, registriere erneut...');
-              webrtc.register();
-            }
-          });
-        }
-      }
+      // Peer bei Bedarf wieder anmelden (selbst gebremst: höchstens alle 15 s, nie parallel)
+      if (webrtc) webrtc.ensureRegistered();
 
     } catch (e) {
       console.error('Polling-Fehler:', e);
+    } finally {
+      POLLING = false;
     }
-  }, 5000); // Alle 5 Sekunden
 }
 
 
 // ── MOBILE KEYBOARD DETECTION ─────────────────────────────────────────────
-function detectKeyboard() {
-  const threshold = window.innerHeight * 0.4; // Wenn Viewport < 60% = Tastatur
-  
-  if (window.innerHeight < threshold) {
-    console.log('[Chat] Keyboard detected');
-    document.body.style.overflow = 'hidden';
-    document.getElementById('messages').style.paddingBottom = '50px';
-  } else {
-    console.log('[Chat] Keyboard hidden');
-    document.body.style.overflow = '';
-    document.getElementById('messages').style.paddingBottom = '';
-  }
+// Tastatur: Chat-Fenster passt sich der sichtbaren Fläche an → Eingabefeld bleibt über der Tastatur
+function fitChatToViewport() {
+  const el = document.getElementById('chatDetailScreen');
+  if (!el || el.style.display !== 'flex') return;
+  const vv = window.visualViewport;
+  // Oben und unten am Layout-Fenster verankern; unten so viel Platz lassen, wie die Tastatur verdeckt
+  let bottom = 0;
+  if (vv) bottom = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+  el.style.top = '0px';
+  el.style.height = 'auto';
+  el.style.bottom = bottom + 'px';
+  const m = document.getElementById('messages');
+  if (m) m.scrollTop = m.scrollHeight;
 }
-
-// Resize-Event Listener (wird ausgelöst wenn Keyboard erscheint)
-window.addEventListener('resize', () => {
-  setTimeout(detectKeyboard, 200); // Kurz warten bis Animation fertig
+function detectKeyboard() { fitChatToViewport(); }
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', fitChatToViewport);
+  window.visualViewport.addEventListener('scroll', fitChatToViewport);
+}
+window.addEventListener('resize', fitChatToViewport);
+let KB_TIMER = null;
+document.addEventListener('focusin', (e) => {
+  if (e.target && e.target.id === 'msgInput') {
+    fitChatToViewport();
+    if (KB_TIMER) clearInterval(KB_TIMER);
+    KB_TIMER = setInterval(fitChatToViewport, 250); // Fallback, falls der Browser keine Ereignisse schickt
+    window.scrollTo(0, 0);
+  }
 });
-
-// Direkt nach Login aufrufen
-detectKeyboard();
+document.addEventListener('focusout', (e) => {
+  if (e.target && e.target.id === 'msgInput') {
+    setTimeout(() => { if (document.activeElement && document.activeElement.id === 'msgInput') return; if (KB_TIMER) clearInterval(KB_TIMER); KB_TIMER = null; fitChatToViewport(); }, 400);
+  }
+});
 
 // ── HELPERS ───────────────────────────────────────────────────────────────
 function escapeHtml(s) {

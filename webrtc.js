@@ -18,14 +18,40 @@ window.SpotMeWebRTC = class SpotMeWebRTC {
     this.onDisconnect = null;
     this.onError = null;
     this.onPeerReady = null;
+    this.onImage = null; // komplettes Bild per P2P empfangen
+    this.acceptFrom = null; // optional: (code) => bool, Absender-Filter für Text/Bilder
+    this._rx = {};      // laufende Bild-Empfänge je Partner
 
     this.reconnectAttempts = 0;
     this.MAX_RECONNECT = 5;
     this.isDestroyed = false; // Sicherheitsflag
+    this._registering = false;
+    this._lastRegister = 0;
+    this.lastError = null; // nur zur Anzeige im Profil (Diagnose)
+    this.log = [];         // Verbindungsprotokoll (letzte 40 Ereignisse) für die Diagnose im Profil
+  }
+
+  _log(msg) {
+    const t = new Date().toLocaleTimeString("de-DE");
+    this.log.push(t + " " + msg);
+    if (this.log.length > 40) this.log.shift();
+  }
+
+  // Meldet den Peer nur an, wenn nicht schon einer läuft/angemeldet ist (kein Dauer-Neustart)
+  ensureRegistered() {
+    if (this.isDestroyed || this.peerReady || this._registering) return;
+    if (Date.now() - this._lastRegister < 15000) return;
+    this.register();
   }
 
   async register() {
+    if (this._registering) return;
+    this._registering = true;
+    this._lastRegister = Date.now();
+    // Hängt die Anmeldung (z. B. Netz weg), nach 20 s freigeben, damit ein neuer Versuch möglich ist
+    setTimeout(() => { this._registering = false; }, 20000);
     console.log("[WebRTC] Registriere Peer mit ID:", this.code);
+    this._log("Anmeldung gestartet");
     this.isDestroyed = false;
 
     // Falls noch ein Peer existiert, hart zerstören
@@ -50,118 +76,97 @@ window.SpotMeWebRTC = class SpotMeWebRTC {
       );
       if (!ticketRes.ok) {
         console.error("[WebRTC] Ticket-Anforderung fehlgeschlagen:", ticketRes.status);
-        if (this.onError) this.onError({ type: "ticket-failed" });
-        return;
+        this.lastError = "ticket " + ticketRes.status;
+        this._log("Ticket abgelehnt (" + ticketRes.status + ")");
+        this._registering = false;
+        return; // ensureRegistered() versucht es später erneut
       }
     } catch (e) {
       console.error("[WebRTC] Ticket-Anforderung fehlgeschlagen:", e);
-      if (this.onError) this.onError({ type: "ticket-failed" });
+      this.lastError = "ticket offline";
+      this._log("Ticket: kein Netz zum Server");
+      this._registering = false;
       return;
     }
 
     if (this.isDestroyed) return; // Zwischenzeitlich zerstört (z.B. Logout)
 
-    this.peer = new Peer(this.code, {
+    const me = new Peer(this.code, {
       debug: 2,
       host: "spotme-chat-obom.onrender.com",
       port: 443,
       path: "/peerjs",
       secure: true,
     });
+    this.peer = me;
 
-    this.peer.on("open", (id) => {
+    me.on("open", (id) => {
+      if (this.peer !== me) return;
+      this._log("Beim Signalserver angemeldet ✅");
       console.log("[WebRTC] Peer erfolgreich registriert, ID:", id);
       this.peerReady = true;
+      this._registering = false;
+      this.lastError = null;
       this.reconnectAttempts = 0;
       if (this.onPeerReady) this.onPeerReady(id);
     });
 
-    this.peer.on("connection", (conn) => {
+    me.on("connection", (conn) => {
+      if (this.peer !== me) return;
+      this._log("Eingehende Verbindung von " + conn.peer);
       console.log("[WebRTC] Eingehende Verbindung von:", conn.peer);
       this.handleConnection(conn);
     });
 
-    // ── FEHLERBEHANDLUNG FIX ──────────────────────────────────────────────
-    this.peer.on("error", (err) => {
+    // ── FEHLERBEHANDLUNG ──────────────────────────────────────────
+    // Wichtig: Jede Anmeldung braucht ein frisches, einmaliges Ticket. Ein einfaches
+    // peer.reconnect() hat keins und wird vom Server sofort gekappt → Dauerschleife.
+    // Darum immer komplett neu anmelden (ensureRegistered), aber höchstens alle 15 s.
+    const lost = () => {
+      if (this.peer !== me) return; // altes, schon ersetztes Objekt – ignorieren
+      this.peerReady = false;
+      this._registering = false;
+      if (this.peer && !this.peer.destroyed) { try { this.peer.destroy(); } catch (e) {} }
+      this.peer = null;
+      setTimeout(() => this.ensureRegistered(), 3000);
+    };
+
+    me.on("error", (err) => {
       console.error("[WebRTC] Peer Error:", err.type, err);
+      if (this.peer !== me) return;
+      this.lastError = err.type || "unbekannt";
+      this._log("Fehler: " + (err.type || err.message || "unbekannt"));
 
-      // 1. ID bereits vergeben → Abwarten, bis der alte Eintrag auf dem Server stirbt
-      if (err.type === "unavailable-id") {
-        console.warn(
-          "[WebRTC] ID bereits vergeben. Warte 5s für Server-Cleanup...",
-        );
-        this.peerReady = false;
+      // ID noch vom alten Eintrag belegt → später neu
+      if (err.type === "unavailable-id") { lost(); return; }
 
-        // Alten Peer hart zerstören
-        if (this.peer && !this.peer.destroyed) this.peer.destroy();
-        this.peer = null;
+      // Signalserver weg / Socket zu → neu anmelden
+      if (["network", "server-error", "socket-error", "socket-closed"].includes(err.type)) { lost(); return; }
 
-        setTimeout(() => {
-          if (!this.isDestroyed) {
-            console.log("[WebRTC] Führe erneute Registrierung durch...");
-            this.register();
-          }
-        }, 5000); // ⬅️ 5 Sekunden warten (lässt den Server die alte Socket-ID vergessen)
-        return;
-      }
-
-      // 2. Server nicht erreichbar → Reconnect-Logik
-      if (err.type === "network" || err.type === "server-error") {
-        console.warn("[WebRTC] Server nicht erreichbar. Versuche Reconnect...");
-        this.tryReconnect();
-        return;
-      }
-
-      // 3. Partner nicht online (kein Fehler, einfach ignorieren)
+      // Partner (noch) nicht online: normal, kein Fehler
       if (err.type === "peer-unavailable") {
         if (this.onError) this.onError(err);
         return;
       }
-
-      // Alle anderen Fehler weiterreichen
       if (this.onError) this.onError(err);
     });
 
-    this.peer.on("disconnected", () => {
+    me.on("disconnected", () => {
       console.warn("[WebRTC] Peer disconnected vom Server");
-      this.peerReady = false;
-      if (!this.peer.destroyed) {
-        this.peer.reconnect();
-      }
+      if (this.peer === me) this._log("Signalserver getrennt");
+      lost();
     });
 
-    this.peer.on("close", () => {
+    me.on("close", () => {
       console.log("[WebRTC] Peer geschlossen");
       this.peerReady = false;
+      this._registering = false;
     });
   }
 
   tryReconnect() {
-    if (this.isDestroyed) return;
-    if (this.reconnectAttempts >= this.MAX_RECONNECT) {
-      console.error("[WebRTC] Max Reconnect-Versuche erreicht");
-      if (this.onError) {
-        this.onError(
-          new Error(
-            "Maximale Reconnect-Versuche erreicht. Bitte Seite neu laden.",
-          ),
-        );
-      }
-      return;
-    }
-
-    this.reconnectAttempts++;
-    const delay = 2000 * this.reconnectAttempts;
-
-    console.log(
-      `[WebRTC] Reconnect in ${delay}ms (Versuch ${this.reconnectAttempts}/${this.MAX_RECONNECT})`,
-    );
-
-    setTimeout(() => {
-      if (!this.isDestroyed) {
-        this.register();
-      }
-    }, delay);
+    this._lastRegister = 0;
+    this.ensureRegistered();
   }
 
   async waitForReady() {
@@ -204,12 +209,18 @@ window.SpotMeWebRTC = class SpotMeWebRTC {
 
     this.conn = conn;
 
+    conn.on("iceStateChanged", (s) => this._log("ICE " + s + " (" + conn.peer + ")"));
     conn.on("open", () => {
+      this._log("Direktverbindung offen ✅ (" + conn.peer + ")");
       console.log("[WebRTC] Datenkanal geöffnet zu", conn.peer);
       if (this.onConnect) this.onConnect(conn.peer);
     });
 
     conn.on("data", (data) => {
+      // Filter der App: unbekannte/pausierte/beendete Kontakte werden still verworfen (ohne Ack)
+      if (data && data.type !== "ACK" && typeof this.acceptFrom === "function" && !this.acceptFrom(conn.peer)) return;
+      if (data && data.type === "IMG_START") { this._imgStart(conn, data); return; }
+      if (data && data.type === "IMG_CHUNK") { this._imgChunk(conn, data); return; }
       if (this.onMessage && data.type === "MESSAGE") {
         this.onMessage({
           text: data.text,
@@ -233,15 +244,77 @@ window.SpotMeWebRTC = class SpotMeWebRTC {
     });
 
     conn.on("close", () => {
+      this._log("Direktverbindung geschlossen (" + conn.peer + ")");
       console.log("[WebRTC] Verbindung geschlossen zu", conn.peer);
       if (this.conn === conn) this.conn = null;
       if (this.onDisconnect) this.onDisconnect(conn.peer);
     });
 
     conn.on("error", (err) => {
+      this._log("Verbindungsfehler: " + (err && (err.type || err.message) || "?"));
       console.error("[WebRTC] Connection Error:", err);
       if (this.onError) this.onError(err);
     });
+  }
+
+  // ── Bilder: nur direkt per P2P, in Stücken, nie über den Server ──
+  _imgStart(conn, d) {
+    const ok = d && typeof d.id === "string" && d.id.length <= 40 &&
+      Number.isInteger(d.n) && d.n >= 1 && d.n <= 60 &&
+      d.mime === "image/jpeg" && Number.isFinite(d.ts);
+    if (!ok) return;
+    const prev = this._rx[conn.peer];
+    if (prev && prev.timer) clearTimeout(prev.timer);
+    const rx = { id: d.id, n: d.n, parts: [], bytes: 0, ts: d.ts, fromName: String(d.fromName || "").slice(0, 40) };
+    rx.timer = setTimeout(() => { if (this._rx[conn.peer] === rx) delete this._rx[conn.peer]; }, 60000);
+    this._rx[conn.peer] = rx;
+  }
+
+  _imgChunk(conn, d) {
+    const rx = this._rx[conn.peer];
+    if (!rx || !d || d.id !== rx.id || d.i !== rx.parts.length || typeof d.d !== "string" || d.d.length > 40000) return;
+    rx.bytes += d.d.length;
+    if (rx.bytes > 2200000) { clearTimeout(rx.timer); delete this._rx[conn.peer]; return; }
+    rx.parts.push(d.d);
+    if (rx.parts.length < rx.n) return;
+    clearTimeout(rx.timer);
+    delete this._rx[conn.peer];
+    const b64 = rx.parts.join("");
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return;
+    if (this.onImage) {
+      this.onImage({ id: rx.id, from: conn.peer, fromName: rx.fromName, ts: rx.ts, dataUrl: "data:image/jpeg;base64," + b64 });
+    }
+    try { conn.send({ type: "ACK", ackTs: rx.ts }); } catch (e) {}
+  }
+
+  async sendImage(dataUrl, ts, id) {
+    const conn = this.conn;
+    if (!conn || !conn.open) return false;
+    const m = /^data:image\/jpeg;base64,(.+)$/.exec(dataUrl || "");
+    if (!m) return false;
+    const b64 = m[1], SIZE = 30000, n = Math.ceil(b64.length / SIZE);
+    if (n > 60) return false;
+    try {
+      conn.send({ type: "IMG_START", id, n, mime: "image/jpeg", ts, fromName: this.userName });
+      for (let i = 0; i < n; i++) {
+        if (!conn.open) return false;
+        // nicht schneller senden, als der Kanal abtransportiert
+        let guard = 0;
+        while (conn.dataChannel && conn.dataChannel.bufferedAmount > 512 * 1024 && guard++ < 200) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        conn.send({ type: "IMG_CHUNK", id, i, d: b64.slice(i * SIZE, (i + 1) * SIZE) });
+      }
+      return true;
+    } catch (e) {
+      console.warn("[WebRTC] Bild senden fehlgeschlagen:", e);
+      return false;
+    }
+  }
+
+  // Direkter Kanal genau zu diesem Partner offen?
+  isConnectedTo(partnerCode) {
+    return !!(this.conn && this.conn.open && this.conn.peer === partnerCode);
   }
 
   initiateConnection(partnerCode) {
@@ -249,6 +322,13 @@ window.SpotMeWebRTC = class SpotMeWebRTC {
       console.error("[WebRTC] Peer nicht bereit für initiateConnection");
       return null;
     }
+
+    if (this.conn && this.conn.open && this.conn.peer === partnerCode) return this.conn;
+    // Läuft schon ein Verbindungsversuch zu diesem Partner (< 10 s)? Dann nicht noch einen starten.
+    if (this._connAt && this._connTo === partnerCode && Date.now() - this._connAt < 10000) return null;
+    this._connAt = Date.now();
+    this._connTo = partnerCode;
+    this._log("Verbinde zu " + partnerCode + " …");
 
     const conn = this.peer.connect(partnerCode, {
       metadata: { from: this.code, fromName: this.userName },
